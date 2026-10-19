@@ -1,0 +1,6 @@
+streamlit
+pymupdf
+pydantic
+pytest
+anthropic
+python-dotenv

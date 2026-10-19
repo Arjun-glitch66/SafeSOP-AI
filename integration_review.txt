@@ -1,0 +1,561 @@
+
+
+========== src\document_parser.py ==========
+
+import hashlib
+import shutil
+from pathlib import Path
+
+import pymupdf
+
+
+PROJECT_DIR = Path(__file__).resolve().parent.parent
+ORIGINALS_DIR = PROJECT_DIR / "data" / "originals"
+GENERATED_DIR = PROJECT_DIR / "data" / "generated"
+
+ORIGINALS_DIR.mkdir(parents=True, exist_ok=True)
+GENERATED_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def calculate_file_hash(file_path):
+    """Calculate SHA-256 so we can identify the original file."""
+    digest = hashlib.sha256()
+
+    with open(file_path, "rb") as file:
+        for chunk in iter(lambda: file.read(8192), b""):
+            digest.update(chunk)
+
+    return digest.hexdigest()
+
+
+def store_original(uploaded_file):
+    """
+    Save an uploaded PDF without overwriting an existing original.
+    uploaded_file must have a name and support read().
+    """
+    filename = Path(uploaded_file.name).name
+
+    if Path(filename).suffix.lower() != ".pdf":
+        raise ValueError("Please upload a PDF file.")
+
+    content = uploaded_file.read()
+
+    if not content.startswith(b"%PDF-"):
+        raise ValueError("The uploaded file is not a valid PDF.")
+
+    file_hash = hashlib.sha256(content).hexdigest()
+
+    # Reuse the stored copy if this exact file already exists.
+    destination = ORIGINALS_DIR / f"{file_hash}.pdf"
+
+    if not destination.exists():
+        destination.write_bytes(content)
+
+    return {
+        "original_name": filename,
+        "original_path": str(destination),
+        "file_hash": file_hash,
+    }
+
+
+def extract_pdf_pages(file_path):
+    """Return one extracted text string for each PDF page."""
+    pages = []
+
+    with pymupdf.open(file_path) as document:
+        for page_number, page in enumerate(document, start=1):
+            pages.append({
+                "page_number": page_number,
+                "text": page.get_text(sort=True).strip(),
+            })
+
+    return pages
+
+
+def extract_single_page(file_path, page_number):
+    """Page numbers supplied by the user start at 1."""
+    pages = extract_pdf_pages(file_path)
+
+    if page_number < 1 or page_number > len(pages):
+        raise ValueError(
+            f"Page must be between 1 and {len(pages)}."
+        )
+
+    return pages[page_number - 1]
+
+
+def get_document_summary(file_path):
+    pages = extract_pdf_pages(file_path)
+
+    return {
+        "page_count": len(pages),
+        "pages_with_text": sum(
+            1 for page in pages if page["text"]
+        ),
+        "total_characters": sum(
+            len(page["text"]) for page in pages
+        ),
+        "pages": pages,
+    }
+
+
+def save_generated_pdf(source_path, output_path):
+    """
+    Create an exact PDF copy for version storage.
+    This does not modify the original.
+    """
+    source = Path(source_path)
+    output = Path(output_path)
+
+    if not source.is_file():
+        raise FileNotFoundError("Source PDF not found.")
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    if source.resolve() == output.resolve():
+        raise ValueError("Output must not overwrite the source.")
+
+    shutil.copy2(source, output)
+
+    return str(output)
+
+
+========== src\sop_generator.py ==========
+
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+
+def build_sop_prompt(
+    original_text,
+    change_request,
+    output_scope="full",
+    target_page=None,
+    target_section=None,
+    feedback=None,
+):
+    """Build the prompt from the immutable original source."""
+
+    if output_scope not in ("full", "page", "section", "step"):
+        raise ValueError("Invalid output scope.")
+
+    scope_instructions = {
+        "full": (
+            "Produce a complete revised SOP based on the source. "
+            "Preserve all unaffected content."
+        ),
+        "page": (
+            "Produce revised content for the selected page only. "
+            "Do not claim to reproduce the original PDF layout."
+        ),
+        "section": (
+            "Produce revised content for the selected section only."
+        ),
+        "step": (
+            "Revise only the targeted procedure step and include "
+            "any necessary safety context."
+        ),
+    }
+
+    prompt = f"""
+You are assisting with the revision of a safety-critical SOP.
+
+IMPORTANT RULES:
+1. Treat the supplied original SOP as the source of truth.
+2. Do not invent missing technical facts, values, tools, or steps.
+3. Preserve mandatory warnings, precautions, and emergency instructions.
+4. Preserve critical prerequisites and step ordering.
+5. Apply only changes supported by the change request.
+6. If information is missing or instructions conflict with safety
+   requirements, explicitly flag the uncertainty instead of guessing.
+7. This output is a draft requiring qualified human review.
+8. Do not claim that the document has passed safety validation.
+
+OUTPUT SCOPE:
+{scope_instructions[output_scope]}
+
+TARGET PAGE:
+{target_page if target_page is not None else "Not specified"}
+
+TARGET SECTION OR STEP:
+{target_section or "Not specified"}
+
+ENGINEER CHANGE REQUEST:
+{change_request}
+
+ADDITIONAL REVIEW FEEDBACK:
+{feedback or "No additional feedback."}
+
+ORIGINAL SOP CONTENT:
+--- BEGIN ORIGINAL ---
+{original_text}
+--- END ORIGINAL ---
+
+Return the result in this structure:
+
+DRAFT:
+[Revised SOP content]
+
+CHANGE SUMMARY:
+[What changed]
+
+PRESERVED SAFETY REQUIREMENTS:
+[Warnings and precautions retained]
+
+UNRESOLVED QUESTIONS:
+[Missing information, conflicts, or uncertain requirements]
+
+SOURCE LIMITATIONS:
+[Any information that could not be verified from the supplied source]
+"""
+    return prompt
+
+
+def generate_sop(
+    original_text,
+    change_request,
+    output_scope="full",
+    target_page=None,
+    target_section=None,
+    feedback=None,
+):
+    """Generate a draft using the configured Anthropic API."""
+
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+
+    if not api_key:
+        raise RuntimeError(
+            "ANTHROPIC_API_KEY is not configured. "
+            "Add your own API key to the project's .env file."
+        )
+
+    import anthropic
+
+    client = anthropic.Anthropic(api_key=api_key)
+
+    prompt = build_sop_prompt(
+        original_text=original_text,
+        change_request=change_request,
+        output_scope=output_scope,
+        target_page=target_page,
+        target_section=target_section,
+        feedback=feedback,
+    )
+
+    model = os.getenv("ANTHROPIC_MODEL")
+
+    if not model:
+        raise RuntimeError(
+            "Set ANTHROPIC_MODEL in .env to a model "
+            "available to your API account."
+        )
+
+    response = client.messages.create(
+        model=model,
+        max_tokens=8000,
+        messages=[
+            {"role": "user", "content": prompt}
+        ],
+    )
+
+    return {
+        "text": "\n".join(
+            block.text
+            for block in response.content
+            if block.type == "text"
+        ),
+        "model": model,
+        "input_tokens": response.usage.input_tokens,
+        "output_tokens": response.usage.output_tokens,
+    }
+
+
+========== src\safety_evaluator.py ==========
+
+import re
+
+
+def normalize_text(text):
+    """Normalize text for simple, case-insensitive comparison."""
+    text = text.lower().strip()
+    text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"[^\w\s]", "", text)
+    return text
+
+
+def warning_recall(required_warnings, generated_warnings):
+    """Calculate the proportion of required warnings preserved."""
+    required = set(normalize_text(w) for w in required_warnings)
+    generated = set(normalize_text(w) for w in generated_warnings)
+
+    if not required:
+        return 1.0
+
+    preserved = required.intersection(generated)
+    return len(preserved) / len(required)
+
+
+def warning_precision(required_warnings, generated_warnings):
+    """Calculate how many generated warnings match required warnings."""
+    required = set(normalize_text(w) for w in required_warnings)
+    generated = set(normalize_text(w) for w in generated_warnings)
+
+    if not generated:
+        return 1.0 if not required else 0.0
+
+    correct = required.intersection(generated)
+    return len(correct) / len(generated)
+
+
+def unsupported_instruction_rate(instructions):
+    """
+    Instructions must be dictionaries containing:
+    text: instruction text
+    supported: True or False
+
+    This function evaluates supplied support labels.
+    It does not independently determine factual support.
+    """
+    if not instructions:
+        return 0.0
+
+    unsupported = sum(
+        1 for item in instructions
+        if item.get("supported") is False
+    )
+
+    return unsupported / len(instructions)
+
+
+def order_integrity(required_pairs, generated_order):
+    """
+    required_pairs: list of (before_step_id, after_step_id)
+    generated_order: list of step IDs in generated sequence
+    """
+    if not required_pairs:
+        return 1.0
+
+    positions = {
+        step_id: index
+        for index, step_id in enumerate(generated_order)
+    }
+
+    correct = 0
+
+    for before, after in required_pairs:
+        if before not in positions or after not in positions:
+            continue
+
+        if positions[before] < positions[after]:
+            correct += 1
+
+    return correct / len(required_pairs)
+
+
+def evaluate_sop(
+    required_warnings,
+    generated_warnings,
+    instructions,
+    required_order_pairs,
+    generated_order
+):
+    """Run the initial SAFE-SOP rule-based evaluation."""
+
+    recall = warning_recall(
+        required_warnings, generated_warnings
+    )
+
+    precision = warning_precision(
+        required_warnings, generated_warnings
+    )
+
+    unsupported_rate = unsupported_instruction_rate(
+        instructions
+    )
+
+    order_score = order_integrity(
+        required_order_pairs, generated_order
+    )
+
+    findings = []
+
+    # Conservative rule: every required warning must be retained.
+    required_set = set(
+        normalize_text(w) for w in required_warnings
+    )
+    generated_set = set(
+        normalize_text(w) for w in generated_warnings
+    )
+
+    missing_warnings = required_set - generated_set
+
+    if missing_warnings:
+        findings.append({
+            "type": "missing_warning",
+            "severity": "critical",
+            "details": sorted(missing_warnings)
+        })
+
+    unsupported = [
+        item["text"]
+        for item in instructions
+        if item.get("supported") is False
+    ]
+
+    if unsupported:
+        findings.append({
+            "type": "unsupported_instruction",
+            "severity": "critical",
+            "details": unsupported
+        })
+
+    positions = {
+        step_id: index
+        for index, step_id in enumerate(generated_order)
+    }
+
+    order_violations = []
+
+    for before, after in required_order_pairs:
+        if (
+            before not in positions
+            or after not in positions
+            or positions[before] >= positions[after]
+        ):
+            order_violations.append({
+                "before": before,
+                "after": after
+            })
+
+    if order_violations:
+        findings.append({
+            "type": "step_order_violation",
+            "severity": "critical",
+            "details": order_violations
+        })
+
+    status = "FAIL" if findings else "PASS"
+
+    return {
+        "status": status,
+        "metrics": {
+            "warning_recall": round(recall, 4),
+            "warning_precision": round(precision, 4),
+            "unsupported_instruction_rate": round(
+                unsupported_rate, 4
+            ),
+            "critical_order_integrity": round(
+                order_score, 4
+            )
+        },
+        "findings": findings
+    }
+
+
+========== src\version_manager.py ==========
+
+import hashlib
+from pathlib import Path
+
+from src.database import (
+    register_original,
+    create_generation_request,
+    save_version,
+    get_versions,
+)
+from src.document_parser import ORIGINALS_DIR, GENERATED_DIR
+
+
+def sha256_file(file_path):
+    digest = hashlib.sha256()
+
+    with open(file_path, "rb") as file:
+        for chunk in iter(lambda: file.read(8192), b""):
+            digest.update(chunk)
+
+    return digest.hexdigest()
+
+
+def register_uploaded_document(uploaded_file):
+    """Store and register the immutable original PDF."""
+
+    from src.document_parser import store_original
+
+    stored = store_original(uploaded_file)
+
+    document_id = register_original(
+        stored["original_name"],
+        stored["original_path"],
+        stored["file_hash"],
+    )
+
+    return {
+        "document_id": document_id,
+        **stored,
+    }
+
+
+def create_request(
+    document_id,
+    change_request,
+    output_scope="full",
+    target_page=None,
+    target_section=None,
+):
+    return create_generation_request(
+        document_id=document_id,
+        change_request=change_request,
+        output_scope=output_scope,
+        target_page=target_page,
+        target_section=target_section,
+    )
+
+
+def save_generated_version(
+    document_id,
+    request_id,
+    original_name,
+    generated_text,
+    parent_version_id=None,
+):
+    """
+    Save a text draft as a distinct version.
+
+    This does not create a PDF. PDF export will be implemented
+    separately so text drafts are not mistaken for finished PDFs.
+    """
+
+    existing_versions = get_versions(document_id)
+    version_number = len(existing_versions) + 1
+
+    safe_name = Path(original_name).stem
+    version_name = f"{safe_name}_{version_number}"
+
+    output_dir = GENERATED_DIR / str(document_id)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    output_path = output_dir / f"{version_name}.md"
+    output_path.write_text(generated_text, encoding="utf-8")
+
+    version_id = save_version(
+        document_id=document_id,
+        request_id=request_id,
+        version_name=version_name,
+        file_path=str(output_path),
+        content=generated_text,
+        parent_version_id=parent_version_id,
+    )
+
+    return {
+        "version_id": version_id,
+        "version_number": version_number,
+        "version_name": version_name,
+        "file_path": str(output_path),
+        "content_hash": sha256_file(output_path),
+    }
+
+
+def list_document_versions(document_id):
+    return get_versions(document_id)
