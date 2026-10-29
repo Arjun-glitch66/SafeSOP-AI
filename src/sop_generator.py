@@ -1,8 +1,42 @@
 import os
+
 from dotenv import load_dotenv
 from google import genai
+from google.genai import types
+from pydantic import BaseModel
 
 load_dotenv()
+
+# Bump whenever build_sop_prompt or the output schema changes so each saved
+# version records which prompt produced it.
+# v1: plain-text sections. v2: same rules, JSON output enforced by response_schema.
+PROMPT_VERSION = "v2"
+
+DEFAULT_TEMPERATURE = 0.2  # low: revisions should stay close to the source
+RETRY_STATUS_CODES = [429, 500, 502, 503, 504]
+
+
+class SopDraft(BaseModel):
+    draft: str
+    change_summary: str
+    preserved_safety_requirements: str
+    unresolved_questions: str
+    source_limitations: str
+
+
+SECTION_TITLES = [
+    ("draft", "DRAFT"),
+    ("change_summary", "CHANGE SUMMARY"),
+    ("preserved_safety_requirements", "PRESERVED SAFETY REQUIREMENTS"),
+    ("unresolved_questions", "UNRESOLVED QUESTIONS"),
+    ("source_limitations", "SOURCE LIMITATIONS"),
+]
+
+
+def render_sections(sections):
+    """Render structured output in the same section layout v1 produced, so storage,
+    the evaluator and the UI treat both prompt versions the same way."""
+    return "\n\n".join(f"{title}:\n{sections[key].strip()}" for key, title in SECTION_TITLES).strip()
 
 
 def build_sop_prompt(
@@ -71,22 +105,16 @@ ORIGINAL SOP CONTENT:
 {original_text}
 --- END ORIGINAL ---
 
-Return the result in this structure:
+Return JSON with these fields:
 
-DRAFT:
-[Revised SOP content]
-
-CHANGE SUMMARY:
-[What changed]
-
-PRESERVED SAFETY REQUIREMENTS:
-[List the source warnings and precautions retained. Do not claim a warning was retained if it was not.]
-
-UNRESOLVED QUESTIONS:
-[Missing information, conflicts, or uncertain requirements]
-
-SOURCE LIMITATIONS:
-[Any information that could not be verified from the supplied source]
+draft: the revised SOP content. Keep numbered procedure steps as numbered lines
+  ("1. ...") and keep each warning on its own line starting with its label
+  (WARNING:, CAUTION:, DANGER:).
+change_summary: what changed.
+preserved_safety_requirements: the source warnings and precautions retained.
+  Do not claim a warning was retained if it was not.
+unresolved_questions: missing information, conflicts, or uncertain requirements.
+source_limitations: any information that could not be verified from the supplied source.
 """
 
 
@@ -122,23 +150,50 @@ def generate_sop(
         feedback=feedback,
     )
 
-    client = genai.Client(api_key=api_key)
+    try:
+        temperature = float(os.getenv("GEMINI_TEMPERATURE", DEFAULT_TEMPERATURE))
+    except ValueError:
+        raise RuntimeError("GEMINI_TEMPERATURE in .env must be a number, e.g. 0.2.") from None
+
+    client = genai.Client(
+        api_key=api_key,
+        http_options=types.HttpOptions(
+            timeout=120_000,  # milliseconds
+            # The SDK retries rate limits (429) and server errors with exponential backoff.
+            retry_options=types.HttpRetryOptions(attempts=4, http_status_codes=RETRY_STATUS_CODES),
+        ),
+    )
     response = client.models.generate_content(
         model=model,
         contents=prompt,
+        config=types.GenerateContentConfig(
+            temperature=temperature,
+            response_mime_type="application/json",
+            response_schema=SopDraft,
+        ),
     )
 
-    generated_text = response.text
-    if not generated_text or not generated_text.strip():
+    if not isinstance(response.parsed, SopDraft) or not response.parsed.draft.strip():
+        # Usually a response cut off mid-JSON (e.g. finish reason MAX_TOKENS) or blocked.
+        # Never save a JSON fragment as a draft: fail the generation so no version is created.
+        candidates = getattr(response, "candidates", None) or []
+        reason = getattr(candidates[0], "finish_reason", None) if candidates else None
         raise RuntimeError(
-            "Gemini returned an empty response. Check the model response or try again."
+            "Gemini did not return a complete structured draft"
+            + (f" (finish reason: {getattr(reason, 'name', reason)})" if reason else "")
+            + ". No version was saved; try again or shorten the source."
         )
+    generated_text = render_sections(response.parsed.model_dump())
+    structured = True
 
     usage = getattr(response, "usage_metadata", None)
 
     return {
-        "text": generated_text.strip(),
+        "text": generated_text,
         "model": model,
+        "prompt_version": PROMPT_VERSION,
+        "temperature": temperature,
+        "structured_output": structured,
         "input_tokens": getattr(usage, "prompt_token_count", None),
         "output_tokens": getattr(usage, "candidates_token_count", None),
     }

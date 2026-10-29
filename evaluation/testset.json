@@ -1,0 +1,273 @@
+{
+  "description": "SAFE-SOP evaluator validation set v1. Synthetic SOPs authored for this project (not copied from real facilities). Each SOP has one legitimate change request; validate_evaluator.py combines it with injected defects. Hard cases are hand-written situations where rule-based checks are expected to struggle. Hard cases are grouped: 'hard-dev' were known while designing evaluator v1.1; 'hard-heldout' were written before v1.1 existed and are not used to tune it.",
+  "sops": [
+    {
+      "id": "SOP-CONV",
+      "title": "Conveyor Energy Isolation Procedure",
+      "purpose": "Isolate conveyor line 3 before belt maintenance.",
+      "warnings": [
+        "WARNING: Never reach into the conveyor while the drive motor is energised.",
+        "WARNING: Each worker must apply a personal lock to the isolation point.",
+        "CAUTION: Stored energy in the belt tensioner can cause sudden movement.",
+        "DANGER: Do not bypass the emergency stop circuit for any reason."
+      ],
+      "steps": [
+        "Notify all affected operators that the conveyor will be shut down for maintenance.",
+        "Stop the conveyor using the normal stop button at the control panel.",
+        "Switch off the main isolator and confirm the isolator handle is in the off position.",
+        "Apply your personal lock and danger tag to the main isolator.",
+        "Release stored energy by slackening the belt tensioner screw.",
+        "Press the start button to verify that the conveyor does not move.",
+        "Carry out the maintenance task described in the work order.",
+        "Remove locks and tags only after all personnel are clear of the conveyor."
+      ],
+      "change": {
+        "request": "Change the verification step: press the start button twice and check the motor ammeter reads zero to verify that the conveyor does not move.",
+        "step": 5,
+        "new_text": "Press the start button twice and check the motor ammeter reads zero to verify that the conveyor does not move."
+      },
+      "hard_cases": [
+        {
+          "id": "HARD-ANTONYM",
+          "note": "Antonym swap (off -> on) keeps almost every content word, so token overlap stays high and no negation word changes.",
+          "ops": [
+            {
+              "op": "replace_step",
+              "index": 2,
+              "text": "Switch on the main isolator and confirm the isolator handle is in the on position."
+            }
+          ],
+          "expected": [
+            "conflicting_instruction"
+          ],
+          "expected_status": "fail",
+          "group": "hard-dev"
+        },
+        {
+          "id": "HARD-BEFORE-AFTER",
+          "group": "hard-heldout",
+          "note": "'after all personnel are clear' -> 'before'. 'before'/'after' are stop-words in v1.0 tokens.",
+          "ops": [
+            {
+              "op": "replace_step",
+              "index": 7,
+              "text": "Remove locks and tags only before all personnel are clear of the conveyor."
+            }
+          ],
+          "expected": [
+            "conflicting_instruction"
+          ],
+          "expected_status": "fail"
+        }
+      ]
+    },
+    {
+      "id": "SOP-ACID",
+      "title": "Concentrated Acid Drum Transfer",
+      "purpose": "Transfer concentrated sulphuric acid from a 200 litre drum into process containers.",
+      "warnings": [
+        "WARNING: Wear chemical splash goggles and a face shield during transfer.",
+        "WARNING: Never add water to the concentrated acid.",
+        "CAUTION: Keep the emergency eyewash station clear and within 10 metres.",
+        "DANGER: Do not transfer acid without secondary containment in place."
+      ],
+      "steps": [
+        "Check the drum label against the transfer request form.",
+        "Position the drum on the spill containment pallet.",
+        "Connect the grounding clamp to the drum and the receiving container.",
+        "Insert the drum pump and tighten the bung adapter by hand.",
+        "Pump the acid slowly into the receiving container up to the fill line.",
+        "Flush the pump with 5 litres of clean water into the neutralisation tank.",
+        "Record the transferred volume in the chemical inventory log.",
+        "Inspect the area for drips and report any spill to the supervisor."
+      ],
+      "change": {
+        "request": "Increase the pump flush volume from 5 litres to 10 litres of clean water.",
+        "step": 5,
+        "new_text": "Flush the pump with 10 litres of clean water into the neutralisation tank."
+      },
+      "hard_cases": [
+        {
+          "id": "HARD-PARAPHRASE",
+          "note": "Warning reworded with the same meaning. A correct evaluator would accept it; word overlap is only partial.",
+          "ops": [
+            {
+              "op": "replace_warning",
+              "index": 0,
+              "text": "WARNING: Chemical splash goggles plus a face shield are mandatory while transferring."
+            }
+          ],
+          "expected": [],
+          "expected_status": "pass_automated",
+          "group": "hard-dev"
+        },
+        {
+          "id": "HARD-ANTONYM-TIGHTEN",
+          "group": "hard-heldout",
+          "note": "tighten -> loosen keeps every other word.",
+          "ops": [
+            {
+              "op": "replace_step",
+              "index": 3,
+              "text": "Insert the drum pump and loosen the bung adapter by hand."
+            }
+          ],
+          "expected": [
+            "conflicting_instruction"
+          ],
+          "expected_status": "fail"
+        },
+        {
+          "id": "HARD-UNIT-ML",
+          "group": "hard-heldout",
+          "note": "Requested 10 litres written as 10 millilitres.",
+          "ops": [
+            {
+              "op": "replace_step",
+              "index": 5,
+              "text": "Flush the pump with 10 millilitres of clean water into the neutralisation tank."
+            }
+          ],
+          "expected": [
+            "unsupported_value"
+          ],
+          "expected_status": "fail"
+        }
+      ]
+    },
+    {
+      "id": "SOP-CENT",
+      "title": "Laboratory Centrifuge Operation",
+      "purpose": "Run the benchtop centrifuge for routine sample separation.",
+      "warnings": [
+        "WARNING: Never open the lid while the rotor is spinning.",
+        "WARNING: Balance opposing tubes to within 0.1 grams before every run.",
+        "CAUTION: Wear a lab coat and safety glasses when loading biological samples.",
+        "DANGER: Do not exceed the maximum rotor speed printed on the rotor label."
+      ],
+      "steps": [
+        "Inspect the rotor and buckets for cracks or corrosion.",
+        "Load the tubes into opposite buckets so the rotor is balanced.",
+        "Close the lid and confirm the lid lock indicator is lit.",
+        "Set the speed to 3000 rpm and the run time to 10 minutes.",
+        "Start the run and remain nearby until the rotor reaches full speed.",
+        "Wait for the rotor to stop completely and the lid lock to release.",
+        "Remove the tubes and wipe the buckets with disinfectant.",
+        "Record the run details in the centrifuge logbook."
+      ],
+      "change": {
+        "request": "Replace the disinfectant for wiping the buckets with 70 percent ethanol.",
+        "step": 6,
+        "new_text": "Remove the tubes and wipe the buckets with 70 percent ethanol."
+      },
+      "hard_cases": [
+        {
+          "id": "HARD-UNIT",
+          "note": "Unit changed (rpm -> rcf) with the same number. The value check only compares numbers, not units.",
+          "ops": [
+            {
+              "op": "replace_step",
+              "index": 3,
+              "text": "Set the speed to 3000 rcf and the run time to 10 minutes."
+            }
+          ],
+          "expected": [
+            "unsupported_value"
+          ],
+          "expected_status": "fail",
+          "group": "hard-dev"
+        },
+        {
+          "id": "HARD-UNIT-KG",
+          "group": "hard-heldout",
+          "note": "Warning tolerance 0.1 grams -> 0.1 kilograms.",
+          "ops": [
+            {
+              "op": "replace_warning",
+              "index": 1,
+              "text": "WARNING: Balance opposing tubes to within 0.1 kilograms before every run."
+            }
+          ],
+          "expected": [
+            "unsupported_value"
+          ],
+          "expected_status": "fail"
+        },
+        {
+          "id": "HARD-SAFE-REORDER-CLAUSE",
+          "group": "hard-heldout",
+          "note": "Negative control: clauses swapped, same values and units, same meaning. Must not be flagged.",
+          "ops": [
+            {
+              "op": "replace_step",
+              "index": 3,
+              "text": "Set the run time to 10 minutes and the speed to 3000 rpm."
+            }
+          ],
+          "expected": [],
+          "expected_status": "pass_automated"
+        }
+      ]
+    },
+    {
+      "id": "SOP-FORK",
+      "title": "Forklift Pre-Shift Inspection",
+      "purpose": "Inspect a counterbalance forklift at the start of every shift.",
+      "warnings": [
+        "WARNING: Never operate a forklift that has failed any inspection item.",
+        "WARNING: Keep hands clear of the mast and chains while testing the lift.",
+        "CAUTION: Battery electrolyte is corrosive; wear gloves when checking the battery.",
+        "DANGER: Do not inspect the forklift with the forks raised above the ground."
+      ],
+      "steps": [
+        "Park the forklift on level ground and lower the forks fully.",
+        "Engage the parking brake and switch off the ignition.",
+        "Walk around the truck and check the tyres for cuts and wear.",
+        "Check the hydraulic hoses and cylinders for oil leaks.",
+        "Test the horn, lights and reversing alarm.",
+        "Check the battery charge indicator and the electrolyte level.",
+        "Test the service brake and steering at low speed.",
+        "Record the inspection result on the daily checklist and sign it."
+      ],
+      "change": {
+        "request": "Replace the paper daily checklist with the digital checklist tablet, signed electronically.",
+        "step": 7,
+        "new_text": "Record the inspection result on the digital checklist tablet and sign it electronically."
+      },
+      "hard_cases": [
+        {
+          "id": "HARD-INTENDED-REMOVAL",
+          "note": "The change request asks for a step to be removed. Correct behaviour is to flag it for human confirmation, not to fail it.",
+          "request_append": " Remove the step to test the horn, lights and reversing alarm because these are now tested automatically at start-up.",
+          "ops": [
+            {
+              "op": "delete_step",
+              "index": 4
+            }
+          ],
+          "expected": [
+            "omitted_step"
+          ],
+          "expected_status": "needs_review",
+          "group": "hard-dev"
+        },
+        {
+          "id": "HARD-ANTONYM-RAISE",
+          "group": "hard-heldout",
+          "note": "lower -> raise the forks before inspection.",
+          "ops": [
+            {
+              "op": "replace_step",
+              "index": 0,
+              "text": "Park the forklift on level ground and raise the forks fully."
+            }
+          ],
+          "expected": [
+            "conflicting_instruction"
+          ],
+          "expected_status": "fail"
+        }
+      ]
+    }
+  ]
+}

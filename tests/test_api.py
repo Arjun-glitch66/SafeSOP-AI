@@ -1,0 +1,184 @@
+"""End-to-end API tests with Gemini stubbed and a temporary database."""
+import hashlib
+
+import pymupdf
+import pytest
+from fastapi.testclient import TestClient
+
+import api
+
+
+@pytest.fixture
+def client(tmp_path, monkeypatch):
+    monkeypatch.setattr(api, "DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr(api, "BACKUP_DIR", tmp_path / "backups")
+    monkeypatch.setattr(api, "UPLOAD_DIR", tmp_path / "originals")
+    monkeypatch.setattr(api, "VERSION_DIR", tmp_path / "versions")
+    (tmp_path / "originals").mkdir()
+    (tmp_path / "versions").mkdir()
+
+    prompts = []
+
+    def fake_generate_sop(original_text, change_request, output_scope, target_page):
+        prompts.append(original_text)
+        return {"text": f"DRAFT:\nREVISED ({output_scope}) {change_request}", "model": "stub-model",
+                "prompt_version": "test", "input_tokens": 10, "output_tokens": 5}
+
+    monkeypatch.setattr(api, "generate_sop", fake_generate_sop)
+    with TestClient(api.app) as test_client:
+        test_client.prompts = prompts
+        yield test_client
+
+
+def upload_two_page_pdf(client):
+    pdf = pymupdf.open()
+    for text in ("PAGE ONE: WARNING disconnect power", "PAGE TWO: open the cover"):
+        pdf.new_page().insert_text((72, 72), text)
+    response = client.post("/api/documents/upload",
+                           files={"file": ("Arjun 1.pdf", pdf.tobytes(), "application/pdf")})
+    assert response.status_code == 200, response.text
+    return response.json()["id"]
+
+
+def generate(client, doc_id, **data):
+    return client.post(f"/api/documents/{doc_id}/generate", data={"scope": "full", **data})
+
+
+def original_hash(doc_id):
+    return hashlib.sha256((api.UPLOAD_DIR / f"{doc_id}.pdf").read_bytes()).hexdigest()
+
+
+def test_upload_rejects_non_pdf(client):
+    response = client.post("/api/documents/upload", files={"file": ("x.pdf", b"not a pdf", "application/pdf")})
+    assert response.status_code == 400
+
+
+def test_every_generation_reads_the_original_and_never_changes_it(client):
+    doc_id = upload_two_page_pdf(client)
+    before = original_hash(doc_id)
+
+    v1 = generate(client, doc_id, description="use torque 20Nm").json()
+    v2 = generate(client, doc_id, description="add gloves", scope="page", target_page=2).json()
+    v3 = generate(client, doc_id, description="regen", parent_version_id=v1["version_id"]).json()
+
+    assert [v["version_number"] for v in (v1, v2, v3)] == [1, 2, 3]
+    assert v3["parent_version_id"] == v1["version_id"]
+    assert "PAGE ONE" in client.prompts[0] and "PAGE TWO" in client.prompts[0]
+    assert "PAGE TWO" in client.prompts[1] and "PAGE ONE" not in client.prompts[1]
+    assert not any("REVISED" in prompt for prompt in client.prompts)
+    assert original_hash(doc_id) == before
+
+
+def test_generation_rejects_bad_input(client):
+    doc_id = upload_two_page_pdf(client)
+    assert generate(client, doc_id, description="x", scope="page", target_page=9).status_code == 400
+    assert generate(client, doc_id, description="x", parent_version_id="nope").status_code == 400
+    assert generate(client, doc_id, description="   ").status_code == 400
+    assert generate(client, "missing-doc", description="x").status_code == 404
+
+
+def test_generator_config_error_is_reported_without_creating_a_version(client, monkeypatch):
+    doc_id = upload_two_page_pdf(client)
+
+    def broken(**kwargs):
+        raise RuntimeError("GEMINI_API_KEY is not configured.")
+
+    monkeypatch.setattr(api, "generate_sop", broken)
+    response = generate(client, doc_id, description="x")
+    assert response.status_code == 502
+    assert "GEMINI_API_KEY is not configured" in response.json()["detail"]
+    assert client.get(f"/api/documents/{doc_id}/versions").json()["versions"] == []
+
+
+def test_version_listing_content_and_download(client):
+    doc_id = upload_two_page_pdf(client)
+    v1 = generate(client, doc_id, description="use torque 20Nm").json()
+    v2 = generate(client, doc_id, description="add gloves", scope="page", target_page=2).json()
+
+    versions = client.get(f"/api/documents/{doc_id}/versions").json()["versions"]
+    assert [v["version_number"] for v in versions] == [2, 1]
+    latest = versions[0]
+    assert (latest["change_request"], latest["scope"], latest["target_page"]) == ("add gloves", "page", 2)
+    assert (latest["model"], latest["source_document_id"]) == ("stub-model", doc_id)
+
+    assert "torque 20Nm" in client.get(f"/api/versions/{v1['version_id']}/content").json()["content"]
+    download = client.get(f"/api/versions/{v2['version_id']}/download")
+    assert download.status_code == 200 and "add gloves" in download.text
+    assert client.get("/api/documents").json()["documents"][0]["version_count"] == 2
+
+
+def test_evaluation_runs_on_generation_and_can_be_rerun(client):
+    doc_id = upload_two_page_pdf(client)
+    v1 = generate(client, doc_id, description="use torque 20Nm").json()
+    generate(client, doc_id, description="add gloves", scope="page", target_page=2)
+
+    # The stub draft drops the source warning, so the evaluator must fail it.
+    assert v1["safety_evaluation"]["status"] == "fail"
+    assert any(f["type"] == "missing_warning" for f in v1["safety_evaluation"]["findings"])
+    assert client.post(f"/api/versions/{v1['version_id']}/evaluate").json()["status"] == "fail"
+
+    evaluations = client.get(f"/api/versions/{v1['version_id']}/evaluations").json()["evaluations"]
+    assert len(evaluations) == 2 and evaluations[0]["metrics"]["source_warnings"] == 1
+
+    statuses = {v["version_number"]: v["evaluation_status"]
+                for v in client.get(f"/api/documents/{doc_id}/versions").json()["versions"]}
+    # Page 2 has no warnings or numbered steps: uncertain, never a pass.
+    assert statuses == {1: "fail", 2: "needs_review"}
+
+
+def test_review_decision_changes_only_that_version(client):
+    doc_id = upload_two_page_pdf(client)
+    v1 = generate(client, doc_id, description="a").json()
+    v2 = generate(client, doc_id, description="b").json()
+
+    url = f"/api/versions/{v1['version_id']}/reviews"
+    assert client.post(url, data={"decision": "lgtm"}).status_code == 400
+    assert client.post(url, data={"decision": "needs_revision", "reviewer": "Arjun",
+                                  "feedback": "check torque"}).status_code == 200
+    assert client.get(url).json()["reviews"][0]["feedback"] == "check torque"
+
+    statuses = {v["id"]: v["status"] for v in client.get(f"/api/documents/{doc_id}/versions").json()["versions"]}
+    assert statuses == {v1["version_id"]: "needs_revision", v2["version_id"]: "draft"}
+
+
+def test_diff_compares_original_with_draft_section(client):
+    doc_id = upload_two_page_pdf(client)
+    v1 = generate(client, doc_id, description="use torque 20Nm").json()
+
+    diff = client.get(f"/api/versions/{v1['version_id']}/diff").json()
+    original = [line for block in diff["blocks"] for line in block["original"]]
+    draft = [line for block in diff["blocks"] for line in block["draft"]]
+    assert any("PAGE ONE" in line for line in original)
+    assert draft == ["REVISED (full) use torque 20Nm"]  # only the DRAFT section, not the header
+    assert diff["source_warnings"] == ["PAGE ONE: WARNING disconnect power"]
+
+
+def test_pdf_download_is_a_labelled_draft(client):
+    doc_id = upload_two_page_pdf(client)
+    v1 = generate(client, doc_id, description="use torque 20Nm").json()
+
+    response = client.get(f"/api/versions/{v1['version_id']}/download?format=pdf")
+    assert response.status_code == 200 and response.headers["content-type"] == "application/pdf"
+    with pymupdf.open(stream=response.content, filetype="pdf") as pdf:
+        text = pdf[0].get_text()
+    assert "AI-GENERATED DRAFT" in text and "Automated check: fail" in text and "torque 20Nm" in text
+    assert client.get(f"/api/versions/{v1['version_id']}/download?format=doc").status_code == 400
+
+
+def test_document_details_include_page_count_but_not_server_path(client):
+    doc_id = upload_two_page_pdf(client)
+    details = client.get(f"/api/documents/{doc_id}").json()
+    assert details["page_count"] == 2 and "stored_path" not in details
+
+
+def test_approval_needs_reviewer_and_justification_when_checks_did_not_pass(client):
+    doc_id = upload_two_page_pdf(client)
+    v1 = generate(client, doc_id, description="a").json()  # stub draft fails the checks
+    url = f"/api/versions/{v1['version_id']}/reviews"
+
+    assert client.post(url, data={"decision": "approved"}).status_code == 400  # no reviewer
+    assert client.post(url, data={"decision": "approved", "reviewer": "Arjun"}).status_code == 400
+    ok = client.post(url, data={"decision": "approved", "reviewer": "Arjun",
+                                "feedback": "Checked by hand: warning moved to step 1."})
+    assert ok.status_code == 200
+    assert client.get(f"/api/versions/{v1['version_id']}").json()["status"] == "approved"
