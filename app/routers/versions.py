@@ -16,7 +16,7 @@ from app.schemas import FINDING_VERDICTS
 from app.services import jobs
 from app.services.evaluation import load_version_source, run_and_save_evaluation
 from app.services.generation import prepare_generation
-from app.services.pdf import render_draft_pdf
+from app.services.pdf import ocr_findings, render_draft_pdf
 from src.safety_evaluator import extract_draft_section, extract_warnings, text_lines
 from src.translator import LANGUAGES, translation_findings
 
@@ -90,8 +90,9 @@ def evaluate_version(version_id: str):
     row, original_text = load_version_source(version_id)
     structured = json.loads(row["structured_json"]) if row["structured_json"] else None
     # The translation check is repeated on the stored back-translation; no new model calls.
-    extra = (translation_findings(row["content"], row["back_translation"], row["output_language"])
-             if row["output_language"] and row["back_translation"] else None)
+    extra = ocr_findings(row["ocr_pages"]) + (
+        translation_findings(row["content"], row["back_translation"], row["output_language"])
+        if row["output_language"] and row["back_translation"] else [])
     return run_and_save_evaluation(version_id, original_text, row["content"], row["description"] or "", structured,
                                    row["target_page"], row["document_type"], extra)
 

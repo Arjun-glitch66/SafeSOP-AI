@@ -896,3 +896,40 @@ def test_failed_translation_keeps_the_english_draft_and_asks_for_review(client, 
     assert any(f["type"] == "translation_failed" and f["severity"] == "review"
                for f in version["safety_evaluation"]["findings"])
     assert client.get(f"/api/versions/{version['version_id']}/download?variant=translation").status_code == 404
+
+
+# --- 3.11 OCR fallback (Tesseract mocked) ---
+
+def scanned_pdf_bytes():
+    """One page that is only an image: no selectable text at all, like a scan."""
+    pdf = pymupdf.open()
+    page = pdf.new_page()
+    pixmap = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 40, 20), False)
+    pixmap.clear_with(200)
+    page.insert_image(page.rect, pixmap=pixmap)
+    return pdf.tobytes()
+
+
+def test_scanned_pages_are_read_by_ocr_and_flagged_for_review(client, monkeypatch):
+    calls = []
+
+    def fake_ocr(path, page_index, modified):
+        calls.append(page_index)
+        return "WARNING: Never open the hopper while the auger runs.\n1. Stop the auger."
+
+    monkeypatch.setattr(api, "ocr_available", lambda: True)
+    monkeypatch.setattr(api, "_ocr_text", fake_ocr)
+    uploaded = client.post("/api/documents/upload", files={"file": ("scan.pdf", scanned_pdf_bytes(), "application/pdf")}).json()
+    assert uploaded["ocr_pages"] == 1
+    version = generate(client, uploaded["id"], description="Stop the auger first.").json()
+    assert "Never open the hopper" in client.prompts[-1] and calls
+    assert any(f["type"] == "ocr_source_text" and f["severity"] == "review"
+               for f in version["safety_evaluation"]["findings"])
+
+
+def test_scanned_pdf_without_ocr_gives_a_clear_error(client, monkeypatch):
+    monkeypatch.setattr(api, "ocr_available", lambda: False)
+    uploaded = client.post("/api/documents/upload", files={"file": ("scan.pdf", scanned_pdf_bytes(), "application/pdf")}).json()
+    assert (uploaded["ocr_pages"], uploaded["ocr_available"]) == (1, False)
+    response = generate(client, uploaded["id"], description="x")
+    assert response.status_code == 422 and "OCR is not available" in response.json()["detail"]

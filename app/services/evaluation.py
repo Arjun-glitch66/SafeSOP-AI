@@ -93,7 +93,7 @@ def load_version_source(version_id):
         row = connection.execute(
             """
             SELECT v.content, v.target_page, v.version_number, v.structured_json, v.output_language, v.back_translation,
-                   d.stored_path, d.filename, d.document_type,
+                   d.stored_path, d.filename, d.document_type, d.ocr_pages,
                    cr.description, cr.scope
             FROM versions v
             JOIN documents d ON d.id = v.document_id

@@ -2,11 +2,63 @@
 import html
 import io
 import logging
+import os
+import shutil
+from functools import lru_cache
 
 import pymupdf
 from fastapi import HTTPException
 
+from app import config
+
 logger = logging.getLogger("safesop")
+
+
+# ---- OCR fallback for scanned pages (PyMuPDF's built-in Tesseract integration) ----
+
+def ocr_available():
+    return bool(shutil.which("tesseract") or os.getenv("TESSDATA_PREFIX"))
+
+
+@lru_cache(maxsize=256)
+def _ocr_text(path, page_index, modified):
+    """OCR one page. Cached per file version: OCR takes seconds a page and the same text is read
+    for generation, comparison and re-checks. ponytail: in-process cache; persist it if it matters."""
+    with pymupdf.open(path) as pdf:
+        page = pdf[page_index]
+        textpage = page.get_textpage_ocr(language=config.OCR_LANGUAGES, dpi=300, full=True)
+        return page.get_text(sort=True, textpage=textpage).strip()
+
+
+def page_text(page, path):
+    """The page's own text, or its OCR text when it has (almost) none and OCR is installed."""
+    text = page.get_text(sort=True).strip()
+    if len(text) >= config.OCR_MIN_CHARS or not ocr_available():
+        return text
+    return _ocr_text(str(path), page.number, os.path.getmtime(path))
+
+
+def pages_needing_ocr(path):
+    """How many pages have (almost) no selectable text, i.e. are scanned images."""
+    with pymupdf.open(path) as pdf:
+        return sum(len(page.get_text().strip()) < config.OCR_MIN_CHARS for page in pdf)
+
+
+def ocr_findings(ocr_pages):
+    """A review finding when any of the original was read by OCR: recognition errors can change
+    numbers and warnings, so the reviewer checks those against the PDF itself."""
+    if not ocr_pages:
+        return []
+    return [{"type": "ocr_source_text", "severity": "review",
+             "detail": f"{ocr_pages} page(s) of the original are scanned images read by OCR. Check numbers, "
+                       "units and warnings against the PDF; recognition errors are possible."}]
+
+
+def no_text_detail(where):
+    if ocr_available():
+        return f"No text found {where}, even with OCR. Check the scan quality."
+    return (f"No selectable text found {where}, and OCR is not available on this server "
+            "(install Tesseract, or use the Docker image, which includes it).")
 
 
 def extract_document_text(stored_path: str, scope: str, target_page: int | None,
@@ -34,24 +86,18 @@ def extract_document_text(stored_path: str, scope: str, target_page: int | None,
                         status_code=400,
                         detail=f"target_page must be between 1 and {len(pdf)}.",
                     )
-                page_text = pdf[target_page - 1].get_text(sort=True).strip()
-                if not page_text:
-                    raise HTTPException(
-                        status_code=422,
-                        detail="No selectable text found on that page. OCR is not implemented.",
-                    )
-                return page_text, target_page
+                text = page_text(pdf[target_page - 1], stored_path)
+                if not text:
+                    raise HTTPException(status_code=422, detail=no_text_detail("on that page"))
+                return text, target_page
 
             pages = [
-                f"[PAGE {index + 1}]\n{page.get_text(sort=True).strip()}"
+                f"[PAGE {index + 1}]\n{page_text(page, stored_path)}"
                 for index, page in enumerate(pdf)
             ]
             text = "\n\n".join(pages).strip()
-            if not text:
-                raise HTTPException(
-                    status_code=422,
-                    detail="No selectable text found in this PDF. OCR is not implemented.",
-                )
+            if not "".join(page.split("\n", 1)[1] for page in pages).strip():
+                raise HTTPException(status_code=422, detail=no_text_detail("in this PDF"))
             return text, None
     except HTTPException:
         raise

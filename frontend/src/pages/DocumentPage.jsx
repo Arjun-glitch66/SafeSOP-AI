@@ -33,6 +33,7 @@ export default function DocumentPage() {
             <p className="title-block-kicker">Source document</p>
             <h1 id="document-title">{doc ? doc.filename.replace(/\.pdf$/i, "").replaceAll("_", " ") : "Loading…"}</h1>
             <p>Every draft is generated from this original PDF and needs a qualified reviewer's sign-off before use.</p>
+            {doc?.ocr_pages > 0 && <p className="small-note">{doc.ocr_pages} page(s) are scanned images and are read by OCR. Check numbers and warnings against the PDF.</p>}
           </div>
           {doc && <div className="action-row"><button className="btn btn-secondary" onClick={() => downloadOriginal(doc.id, doc.filename).catch((error) => show(`Download failed: ${error.message}`, "error"))}><ArrowDownToLine size={16} /> Original PDF</button></div>}
         </div>

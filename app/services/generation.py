@@ -11,7 +11,7 @@ from app import config
 from app.audit import append_audit
 from app.db import connect_db, now
 from app.services.evaluation import run_and_save_evaluation
-from app.services.pdf import extract_document_text
+from app.services.pdf import extract_document_text, ocr_findings
 from app.services.sections import locate, part_text, splice
 from app.storage import resolve
 from src.safety_evaluator import extract_draft_section
@@ -146,6 +146,7 @@ def prepare_generation(document_id, description, scope, target_page, parent_vers
         "document_id": document_id, "filename": document["filename"], "document_type": document["document_type"],
         "description": description, "scope": scope, "target_section": target_section,
         "full_text": full_text, "span": span, "output_language": output_language,
+        "ocr_pages": document["ocr_pages"],
         "original_text": original_text, "resolved_page": resolved_page, "parent_version_id": parent_version_id or None,
         "request_id": request_id, "review_feedback": review_feedback, "created_by": created_by,
     }
@@ -237,10 +238,10 @@ def run_generation(prepared, progress=lambda stage: None):
                    "Check the backend terminal.",
         ) from exc
 
-    extra_findings = None
+    extra_findings = ocr_findings(prepared["ocr_pages"])
     if prepared["output_language"]:
         progress("translating")
-        extra_findings = translate_version(version_id, generated_text, prepared["output_language"])
+        extra_findings += translate_version(version_id, generated_text, prepared["output_language"])
 
     progress("evaluating")
     evaluation = run_and_save_evaluation(version_id, evaluate_against, generated_text, description,

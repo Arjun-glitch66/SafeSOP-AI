@@ -13,7 +13,7 @@ from app.audit import append_audit
 from app.auth import require_role
 from app.db import connect_db, now
 from app.pagination import page_params, paginate
-from app.services.pdf import extract_document_text
+from app.services.pdf import extract_document_text, ocr_available, pages_needing_ocr
 from app.services.sections import outline
 from app.storage import resolve, to_stored_path
 from src.checklists import available_types
@@ -80,6 +80,7 @@ async def upload_document(file: UploadFile = File(...), document_type: str = For
         try:
             with pymupdf.open(stored_path) as pdf:
                 page_count = len(pdf)
+            ocr_pages = pages_needing_ocr(stored_path)
         except Exception:
             raise HTTPException(status_code=400, detail="The PDF could not be opened.") from None
 
@@ -91,8 +92,8 @@ async def upload_document(file: UploadFile = File(...), document_type: str = For
             connection.execute(
                 """
                 INSERT INTO documents
-                    (id, filename, stored_path, sha256, size_bytes, created_at, page_count, document_type)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, filename, stored_path, sha256, size_bytes, created_at, page_count, document_type, ocr_pages)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     document_id,
@@ -103,6 +104,7 @@ async def upload_document(file: UploadFile = File(...), document_type: str = For
                     created,
                     page_count,
                     doc_type,
+                    ocr_pages,
                 ),
             )
             append_audit(connection, user["username"], "document_uploaded", "document", document_id,
@@ -114,6 +116,8 @@ async def upload_document(file: UploadFile = File(...), document_type: str = For
             "id": document_id,
             "filename": filename,
             "document_type": doc_type,
+            "ocr_pages": ocr_pages,
+            "ocr_available": ocr_available(),
             "sha256": file_hash,
             "size_bytes": size,
             "created_at": created,
@@ -142,7 +146,7 @@ def get_document(document_id: str):
     with connect_db() as connection:
         row = connection.execute(
             """
-            SELECT id, filename, stored_path, sha256, size_bytes, created_at, page_count, document_type
+            SELECT id, filename, stored_path, sha256, size_bytes, created_at, page_count, document_type, ocr_pages
             FROM documents WHERE id = ?
             """,
             (document_id,),

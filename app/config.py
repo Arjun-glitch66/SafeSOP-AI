@@ -20,6 +20,11 @@ MAX_SOURCE_CHARS = 60_000
 MAX_DESCRIPTION_CHARS = 2000
 MAX_FEEDBACK_CHARS = 2000
 
+# OCR for scanned pages: pages with fewer extracted characters than this are OCR'd (if Tesseract
+# is installed). Tesseract language codes, '+'-separated, e.g. eng+hin.
+OCR_MIN_CHARS = 20
+OCR_LANGUAGES = os.getenv("OCR_LANGUAGES", "eng")
+
 # Background generation: worker threads, and how long an event stream stays open.
 GENERATION_WORKERS = int(os.getenv("GENERATION_WORKERS", "2"))
 JOB_STREAM_SECONDS = 600

@@ -4,6 +4,12 @@ FROM python:3.14-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
     SAFESOP_DATA_DIR=/data LOG_FORMAT=json
 
+# Tesseract for the OCR fallback on scanned PDFs (English and Hindi; add tesseract-ocr-<lang> as needed).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng tesseract-ocr-hin \
+ && rm -rf /var/lib/apt/lists/*
+ENV OCR_LANGUAGES=eng+hin
+
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
