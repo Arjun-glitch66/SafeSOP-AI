@@ -21,7 +21,7 @@ export default function EvaluationReport({ evaluation }) {
         <div className="finding-row" key={index}>
           <div className={`finding-icon finding-${severityTone[finding.severity]}`}><AlertTriangle size={18} /></div>
           <div className="row-main">
-            <strong>{finding.type.replaceAll("_", " ")}</strong>
+            <strong>{finding.type.replaceAll("_", " ")}{finding.advisory ? " (advisory, model-based)" : ""}</strong>
             <span>{finding.detail}</span>
             {finding.source && <span>Source{finding.source_line ? ` (line ${finding.source_line})` : ""}: <span className="quote">“{finding.source}”</span></span>}
             {finding.draft && <span>Draft{finding.draft_line ? ` (line ${finding.draft_line})` : ""}: <span className="quote">“{finding.draft}”</span></span>}

@@ -7,6 +7,8 @@ on:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    env:
+      SEMANTIC_CHECK: "off"  # the advisory semantic checker never runs in CI
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

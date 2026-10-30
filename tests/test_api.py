@@ -310,3 +310,25 @@ def test_allowed_origins_come_from_env(client, monkeypatch):
     assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
     assert "access-control-allow-origin" not in client.get(
         "/api/health", headers={"Origin": "https://evil.example"}).headers
+
+
+def test_advisory_semantic_findings_are_saved_but_never_lower_status(client, monkeypatch):
+    from src import semantic_checker
+
+    class AlwaysContradicts:
+        name = "fake"
+
+        def find_contradictions(self, originals, drafts):
+            return [(originals[0], drafts[0], 0.9, "fake reason")] if originals and drafts else []
+
+    monkeypatch.setattr(semantic_checker, "backend_from_env", lambda: AlwaysContradicts())
+    doc_id = upload_two_page_pdf(client)
+    stub = {"text": "DRAFT:\nPAGE ONE: WARNING disconnect power\n1. Open the cover.", "model": "stub-model"}
+    monkeypatch.setattr(api, "generate_sop", lambda **kwargs: stub)
+    version = generate(client, doc_id, description="open the cover").json()
+
+    evaluation = client.get(f"/api/versions/{version['version_id']}/evaluations").json()["evaluations"][0]
+    advisory = [f for f in evaluation["findings"] if f.get("advisory")]
+    assert advisory and advisory[0]["type"] == "semantic_contradiction"
+    assert evaluation["metrics"]["semantic_check"]["status"] == "ran"
+    assert evaluation["status"] == "needs_review"  # never pass_automated once an advisory finding exists

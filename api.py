@@ -24,6 +24,7 @@ from src.safety_evaluator import (
     extract_warnings,
     text_lines,
 )
+from src.semantic_checker import apply_semantic_check
 from src.sop_generator import generate_sop
 
 # -------------------- Paths and settings --------------------
@@ -724,6 +725,8 @@ def run_and_save_evaluation(version_id, original_text, generated_text, change_re
     created = now()
     try:
         evaluation = evaluate_revision(original_text, generated_text, change_request)
+        # Off unless SEMANTIC_CHECK=nli|llm. Advisory: may add findings / raise status, never lower it.
+        evaluation = apply_semantic_check(evaluation, original_text, generated_text)
         with connect_db() as connection:
             connection.execute(
                 """

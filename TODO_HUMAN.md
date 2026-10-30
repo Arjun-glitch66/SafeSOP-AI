@@ -34,3 +34,12 @@ Items the coding agent stopped on because they need a product, licence, cost or 
 - **1.4 Second model from another provider?** `--models` compares Gemini models only; there is no
   provider interface yet. A non-Gemini generator needs a paid API key and an adapter in
   `src/sop_generator.py`. Decide whether EXP-003 needs one.
+- **1.5 Semantic checker backends: licence, install size and data sharing.** `SEMANTIC_CHECK`
+  stays `off` until you decide:
+  - `nli`: default model `cross-encoder/nli-deberta-v3-small` (check its Hugging Face model card
+    licence before use). Needs `pip install sentence-transformers`, which installs PyTorch
+    (about 1-2 GB). Not added to `requirements.txt`. Runs locally.
+  - `llm`: an Anthropic Claude judge (`SEMANTIC_LLM_MODEL`, default `claude-opus-5-5`). Needs
+    `pip install anthropic` and an `ANTHROPIC_API_KEY`. Billed per evaluation, and it **sends the
+    SOP warnings and draft steps to Anthropic**; check that this is allowed for your SOPs.
+  - Neither backend has been evaluated. Run it on the EXP-003 labels before trusting it.
