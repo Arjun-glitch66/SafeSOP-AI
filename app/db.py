@@ -128,6 +128,19 @@ def init_db():
             CREATE TRIGGER IF NOT EXISTS audit_events_no_delete BEFORE DELETE ON audit_events
             BEGIN SELECT RAISE(ABORT, 'audit_events is append-only'); END;
 
+            -- Reviewers' verdicts on individual automated findings: labelled data for the benchmark.
+            CREATE TABLE IF NOT EXISTS finding_feedback (
+                id TEXT PRIMARY KEY,
+                evaluation_id TEXT NOT NULL,
+                finding_index INTEGER NOT NULL,
+                finding_type TEXT NOT NULL,
+                verdict TEXT NOT NULL CHECK (verdict IN ('true_problem', 'false_alarm')),
+                user TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(evaluation_id) REFERENCES evaluations(id),
+                UNIQUE(evaluation_id, finding_index, user)
+            );
+
             CREATE TABLE IF NOT EXISTS users (
                 id TEXT PRIMARY KEY,
                 username TEXT NOT NULL UNIQUE,

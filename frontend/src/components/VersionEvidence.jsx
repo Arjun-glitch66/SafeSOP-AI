@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { RefreshCw } from "lucide-react";
-import { getEvaluations, getVersionContent, runEvaluation } from "../api.js";
-import { useNotice, useResource } from "../state.jsx";
+import { RefreshCw, ThumbsDown, ThumbsUp } from "lucide-react";
+import { getEvaluations, getVersionContent, runEvaluation, setFindingFeedback } from "../api.js";
+import { useAuth, useNotice, useResource } from "../state.jsx";
 import DiffView from "./DiffView.jsx";
 import EvaluationReport from "./EvaluationReport.jsx";
 
@@ -12,6 +12,7 @@ const TABS = [["diff", "Compare with original"], ["text", "Full model output"]];
 // the line the finding quotes.
 export default function VersionEvidence({ versionId, onEvaluated }) {
   const { show } = useNotice();
+  const { user, can } = useAuth();
   const evaluations = useResource(() => getEvaluations(versionId), [versionId]);
   const content = useResource(() => getVersionContent(versionId), [versionId]);
   const [view, setView] = useState("diff");
@@ -32,6 +33,27 @@ export default function VersionEvidence({ versionId, onEvaluated }) {
     } finally {
       setEvaluating(false);
     }
+  }
+
+  // Reviewers label each finding; the labels become benchmark data (evaluation/export_finding_feedback.py).
+  async function saveVerdict(index, verdict) {
+    try {
+      await setFindingFeedback(evaluation.id, index, verdict);
+      evaluations.reload();
+    } catch (error) {
+      show(`Could not save your verdict: ${error.message}`, "error");
+    }
+  }
+
+  function findingVerdict(finding, index) {
+    if (!can("reviewer") || !evaluation?.id) return null;
+    const mine = finding.feedback?.find((item) => item.user === user.username)?.verdict;
+    const others = (finding.feedback || []).filter((item) => item.user !== user.username);
+    return <>
+      <button className="text-button" aria-pressed={mine === "true_problem"} onClick={() => saveVerdict(index, "true_problem")}><ThumbsUp size={14} /> True problem</button>
+      <button className="text-button" aria-pressed={mine === "false_alarm"} onClick={() => saveVerdict(index, "false_alarm")}><ThumbsDown size={14} /> False alarm</button>
+      {others.length > 0 && <small className="verdict-note">{others.map((item) => `${item.user}: ${item.verdict.replace("_", " ")}`).join(" · ")}</small>}
+    </>;
   }
 
   function showInComparison(finding) {
@@ -58,7 +80,7 @@ export default function VersionEvidence({ versionId, onEvaluated }) {
           <div><h2 id="checks-heading">Automated checks</h2><p>{evaluation ? `Evaluated ${new Date(evaluation.created_at).toLocaleString()} with ${evaluation.evaluator_version}` : evaluations.loading ? "Loading…" : "This version has no saved evaluation yet."}</p></div>
           <button className="btn btn-secondary" disabled={evaluating} onClick={rerun}><RefreshCw size={16} /> {evaluating ? "Evaluating..." : "Re-run checks"}</button>
         </div>
-        <EvaluationReport evaluation={evaluation} onShowInComparison={showInComparison} />
+        <EvaluationReport evaluation={evaluation} onShowInComparison={showInComparison} renderActions={findingVerdict} />
       </section>
 
       <section className="panel" aria-label="Draft">

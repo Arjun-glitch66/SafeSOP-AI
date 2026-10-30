@@ -18,9 +18,11 @@ def client(tmp_path, monkeypatch):
     (tmp_path / "originals").mkdir()
 
     prompts = []
+    feedbacks = []
 
-    def fake_generate_sop(original_text, change_request, output_scope, target_page):
+    def fake_generate_sop(original_text, change_request, output_scope, target_page, feedback=None):
         prompts.append(original_text)
+        feedbacks.append(feedback)
         return {"text": f"DRAFT:\nREVISED ({output_scope}) {change_request}", "model": "stub-model",
                 "prompt_version": "test", "input_tokens": 10, "output_tokens": 5}
 
@@ -30,6 +32,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(api, "ADMIN_PASSWORD", ADMIN_PASSWORD)
     with TestClient(api.app) as test_client:
         test_client.prompts = prompts
+        test_client.feedbacks = feedbacks
         test_client.admin = sign_in(test_client, "admin", ADMIN_PASSWORD)
         for name, role in (("alice", "author"), ("rita", "reviewer"), ("rob", "reviewer")):
             created = test_client.post("/api/users", json={"username": name, "password": PASSWORD, "role": role},
@@ -551,3 +554,57 @@ def test_findings_carry_line_and_page_numbers_that_match_the_diff(client):
 
     page_two = generate(client, doc_id, description="add gloves", scope="page", target_page=2).json()
     assert all(f["source_page"] in (2, None) for f in page_two["safety_evaluation"]["findings"])
+
+
+
+# --- 2.7 feedback loop ---
+
+def test_regeneration_passes_the_parent_reviews_to_the_model(client):
+    doc_id = upload_two_page_pdf(client)
+    v1 = generate(client, doc_id, description="use torque 20Nm").json()
+    url = f"/api/versions/{v1['version_id']}/reviews"
+    client.post(url, data={"decision": "needs_revision", "feedback": "Keep the WARNING on page one."},
+                headers=client.reviewer)
+    client.post(url, data={"decision": "needs_revision"}, headers=client.reviewer)  # no comment: not sent
+
+    generate(client, doc_id, description="use torque 20Nm", parent_version_id=v1["version_id"])
+    assert client.feedbacks == [None, "- rita (needs revision): Keep the WARNING on page one."]
+    assert "PAGE ONE" in client.prompts[1]  # still generated from the original, not from v1
+
+
+def test_reviewers_label_findings_and_can_change_their_mind(client):
+    doc_id = upload_two_page_pdf(client)
+    version = generate(client, doc_id, description="use torque 20Nm").json()
+    evaluation_id = version["safety_evaluation"]["id"]
+    url = f"/api/evaluations/{evaluation_id}/findings/0/feedback"
+
+    assert client.put(url, data={"verdict": "false_alarm"}).status_code == 403  # authors cannot label
+    assert client.put(url, data={"verdict": "maybe"}, headers=client.reviewer).status_code == 400
+    assert client.put(f"/api/evaluations/{evaluation_id}/findings/99/feedback", data={"verdict": "false_alarm"},
+                      headers=client.reviewer).status_code == 404
+    assert client.put(url, data={"verdict": "false_alarm"}, headers=client.reviewer).status_code == 200
+    assert client.put(url, data={"verdict": "true_problem"}, headers=client.reviewer).status_code == 200
+    assert client.put(url, data={"verdict": "true_problem"}, headers=sign_in(client, "rob")).status_code == 200
+
+    finding = client.get(f"/api/versions/{version['version_id']}/evaluations").json()["evaluations"][0]["findings"][0]
+    assert finding["feedback"] == [{"verdict": "true_problem", "user": "rita"}, {"verdict": "true_problem", "user": "rob"}]
+
+
+def test_finding_feedback_export_makes_benchmark_rows(client, tmp_path):
+    import csv
+    from evaluation.export_finding_feedback import export
+    doc_id = upload_two_page_pdf(client)
+    version = generate(client, doc_id, description="use torque 20Nm").json()
+    evaluation_id = version["safety_evaluation"]["id"]
+    for index, (rita, rob) in enumerate([("true_problem", "true_problem"), ("false_alarm", "true_problem")]):
+        url = f"/api/evaluations/{evaluation_id}/findings/{index}/feedback"
+        client.put(url, data={"verdict": rita}, headers=client.reviewer)
+        client.put(url, data={"verdict": rob}, headers=sign_in(client, "rob"))
+
+    out = tmp_path / "labels.csv"
+    summary = export(api.DB_PATH, out)
+    rows = list(csv.DictReader(out.open(encoding="utf-8")))
+    assert [r["label"] for r in rows] == ["true_problem", "disputed"]
+    assert rows[0]["finding_type"] == version["safety_evaluation"]["findings"][0]["type"]
+    assert rows[0]["evaluator_version"] and rows[0]["source_sha256"] == original_hash(doc_id)
+    assert summary["labelled_findings"] == 2 and summary["disputed"] == 1

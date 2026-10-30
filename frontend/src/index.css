@@ -418,7 +418,9 @@ h1, h2, h3 { font-family: var(--font-display); font-stretch: 112%; letter-spacin
 .page-actions { margin: -8px 0 24px; flex-wrap: wrap; }
 .stack-badges { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
 .title-block-kicker a { color: var(--signal); text-decoration: underline; text-underline-offset: 2px; }
-.finding-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 6px; }
+.finding-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 6px; }
+.finding-actions .text-button[aria-pressed="true"] { color: var(--ink); background: var(--signal-tint); border-radius: 4px; }
+.verdict-note { color: var(--graphite); font-size: var(--t-xs); }
 .register-search { width: 240px; }
 .generation-progress { display: grid; gap: 12px; margin-top: 16px; padding: 16px; background: var(--paper); border-radius: 8px; }
 .generation-progress p { margin: 4px 0 0; color: var(--graphite); font-size: var(--t-sm); }

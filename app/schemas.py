@@ -18,6 +18,7 @@ class NewUser(BaseModel):
 REVIEW_DECISIONS = {"approved", "rejected", "needs_revision"}
 
 
+FINDING_VERDICTS = ("true_problem", "false_alarm")
 LOCKED_STATUSES = ("approved",)
 
 

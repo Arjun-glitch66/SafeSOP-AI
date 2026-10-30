@@ -1,13 +1,15 @@
 """Generating, listing, comparing, evaluating and downloading versions."""
 import difflib
 import json
+import uuid
 
 from fastapi import APIRouter, Depends, Form, HTTPException
 from fastapi.responses import Response
 
 from app import config
 from app.auth import require_role
-from app.db import connect_db
+from app.schemas import FINDING_VERDICTS
+from app.db import connect_db, now
 from app.services.evaluation import load_version_source, run_and_save_evaluation
 from app.services.generation import generate_version
 from app.services.pdf import render_draft_pdf
@@ -80,13 +82,47 @@ def list_evaluations(version_id: str):
             (version_id,),
         ).fetchall()
 
+        verdicts = connection.execute(
+            """SELECT f.evaluation_id, f.finding_index, f.verdict, f.user FROM finding_feedback f
+               JOIN evaluations e ON e.id = f.evaluation_id WHERE e.version_id = ? ORDER BY f.created_at""",
+            (version_id,),
+        ).fetchall()
+
     evaluations = []
     for row in rows:
         item = dict(row)
         item["metrics"] = json.loads(item.pop("metrics_json"))
         item["findings"] = json.loads(item.pop("findings_json"))
+        for index, finding in enumerate(item["findings"]):
+            finding["feedback"] = [{"verdict": v["verdict"], "user": v["user"]} for v in verdicts
+                                   if v["evaluation_id"] == item["id"] and v["finding_index"] == index]
         evaluations.append(item)
     return {"evaluations": evaluations}
+
+
+@router.put("/api/evaluations/{evaluation_id}/findings/{finding_index}/feedback")
+def set_finding_feedback(evaluation_id: str, finding_index: int, verdict: str = Form(...),
+                         user=Depends(require_role("reviewer"))):
+    """A reviewer's verdict on one automated finding: true_problem or false_alarm. One verdict
+    per reviewer per finding; sending another replaces it."""
+    if verdict not in FINDING_VERDICTS:
+        raise HTTPException(status_code=400, detail=f"Verdict must be one of: {', '.join(FINDING_VERDICTS)}.")
+    with connect_db() as connection:
+        row = connection.execute("SELECT findings_json FROM evaluations WHERE id = ?", (evaluation_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Evaluation not found.")
+        findings = json.loads(row["findings_json"])
+        if not 0 <= finding_index < len(findings):
+            raise HTTPException(status_code=404, detail="Finding not found.")
+        connection.execute(
+            """INSERT INTO finding_feedback (id, evaluation_id, finding_index, finding_type, verdict, user, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(evaluation_id, finding_index, user)
+               DO UPDATE SET verdict = excluded.verdict, created_at = excluded.created_at""",
+            (str(uuid.uuid4()), evaluation_id, finding_index, findings[finding_index]["type"], verdict,
+             user["username"], now()),
+        )
+    return {"evaluation_id": evaluation_id, "finding_index": finding_index, "verdict": verdict, "user": user["username"]}
 
 
 @router.get("/api/documents/{document_id}/versions")

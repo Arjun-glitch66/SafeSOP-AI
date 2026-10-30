@@ -107,6 +107,10 @@ export const getEvaluations = async (versionId) => (await request(`/api/versions
 export const runEvaluation = (versionId) => request(`/api/versions/${id(versionId)}/evaluate`, { method: "POST" });
 export const getReviews = async (versionId) => (await request(`/api/versions/${id(versionId)}/reviews`)).reviews;
 
+// A reviewer's verdict on one automated finding: "true_problem" or "false_alarm".
+export const setFindingFeedback = (evaluationId, findingIndex, verdict) =>
+  request(`/api/evaluations/${id(evaluationId)}/findings/${findingIndex}/feedback`, { method: "PUT", body: form({ verdict }) });
+
 // Approval needs the reviewer's password again (electronic signature).
 export const createReview = (versionId, { decision, feedback = "", password }) =>
   request(`/api/versions/${id(versionId)}/reviews`, { method: "POST", body: form({ decision, feedback, password }) });

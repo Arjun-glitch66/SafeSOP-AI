@@ -26,6 +26,7 @@ def generate_version(document_id, description, scope, target_page, parent_versio
     With request_id, the saved change request supplies the description, scope and
     target page (submitted values for those are ignored) and is linked to the draft.
     """
+    review_feedback = None
     with connect_db() as connection:
         document = connection.execute(
             "SELECT * FROM documents WHERE id = ?",
@@ -38,6 +39,15 @@ def generate_version(document_id, description, scope, target_page, parent_versio
                 "SELECT id FROM versions WHERE id = ? AND document_id = ?",
                 (parent_version_id, document_id),
             ).fetchone()
+            # Reviewers' comments on the draft being revised go to the model with the request.
+            parent_reviews = connection.execute(
+                """SELECT decision, reviewer, feedback FROM review_history
+                   WHERE version_id = ? AND feedback != '' ORDER BY created_at""",
+                (parent_version_id,),
+            ).fetchall()
+            review_feedback = "\n".join(
+                f"- {row['reviewer']} ({row['decision'].replace('_', ' ')}): {row['feedback']}" for row in parent_reviews
+            ) or None
 
         saved_request = None
         if request_id:
@@ -103,6 +113,7 @@ def generate_version(document_id, description, scope, target_page, parent_versio
             change_request=description,
             output_scope=scope,
             target_page=resolved_page,
+            feedback=review_feedback,
         )
     except Exception as exc:
         logger.exception("Gemini SOP generation failed for document %s", document_id)
