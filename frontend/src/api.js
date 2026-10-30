@@ -164,6 +164,10 @@ async function saveFile(path, filename) {
 }
 export const downloadVersion = (versionId, versionNumber, format = "txt") =>
   saveFile(`/api/versions/${id(versionId)}/download?format=${format}`, `SafeSOP-v${versionNumber}.${format}`);
+export const downloadApproved = (versionId, versionNumber, format) =>
+  saveFile(`/api/versions/${id(versionId)}/export?format=${format}`, `SafeSOP-v${versionNumber}-approved.${format}`);
+export const downloadEvaluationReport = (versionId, versionNumber) =>
+  saveFile(`/api/versions/${id(versionId)}/evaluation-report.pdf`, `SafeSOP-v${versionNumber}-evaluation.pdf`);
 export const downloadTranslation = (versionId, versionNumber, language) =>
   saveFile(`/api/versions/${id(versionId)}/download?format=txt&variant=translation`, `SafeSOP-v${versionNumber}-${language}.txt`);
 export const downloadOriginal = (documentId, filename) =>

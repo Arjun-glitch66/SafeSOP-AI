@@ -933,3 +933,48 @@ def test_scanned_pdf_without_ocr_gives_a_clear_error(client, monkeypatch):
     assert (uploaded["ocr_pages"], uploaded["ocr_available"]) == (1, False)
     response = generate(client, uploaded["id"], description="x")
     assert response.status_code == 422 and "OCR is not available" in response.json()["detail"]
+
+
+# --- 3.12 exports ---
+
+def approve(client, version_id):
+    response = client.post(f"/api/versions/{version_id}/reviews", headers=client.reviewer,
+                           data={"decision": "approved", "feedback": "Checked by hand.", "password": PASSWORD})
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_only_approved_versions_export_and_the_export_carries_the_signature(client):
+    import io
+    import zipfile
+    from xml.dom import minidom
+    doc_id = upload_two_page_pdf(client)
+    version = generate(client, doc_id, description="use torque 20Nm").json()
+    url = f"/api/versions/{version['version_id']}/export"
+    assert client.get(url).status_code == 409  # still a draft
+    signed = approve(client, version["version_id"])
+
+    docx = client.get(url)
+    assert docx.status_code == 200 and docx.headers["content-type"].startswith("application/vnd.openxmlformats")
+    with zipfile.ZipFile(io.BytesIO(docx.content)) as archive:
+        xml = archive.read("word/document.xml").decode()
+        minidom.parseString(xml)  # well-formed WordprocessingML
+    for expected in ("rita", signed["evaluator_version"], signed["source_sha256"], signed["content_sha256"],
+                     "Change log", "use torque 20Nm", "REVISED (full) use torque 20Nm"):
+        assert expected in xml, expected
+
+    pdf = client.get(url + "?format=pdf")
+    with pymupdf.open(stream=pdf.content, filetype="pdf") as document:
+        text = "".join(page.get_text() for page in document)
+    assert "APPROVED" in text and signed["source_sha256"] in text.replace("\n", "")
+    assert client.get(url + "?format=odt").status_code == 400
+
+
+def test_evaluation_report_pdf(client):
+    doc_id = upload_two_page_pdf(client)
+    version = generate(client, doc_id, description="use torque 20Nm").json()
+    report = client.get(f"/api/versions/{version['version_id']}/evaluation-report.pdf")
+    assert report.status_code == 200 and report.headers["content-type"] == "application/pdf"
+    with pymupdf.open(stream=report.content, filetype="pdf") as document:
+        text = " ".join(page.get_text() for page in document)
+    assert "Automated evaluation report" in text and "missing warning" in text and "never approve" in text

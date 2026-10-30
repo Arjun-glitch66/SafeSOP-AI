@@ -13,7 +13,7 @@ from app.db import connect_db, now
 from app.limits import check_generate_allowed
 from app.pagination import page_params, paginate
 from app.schemas import FINDING_VERDICTS
-from app.services import jobs
+from app.services import exports, jobs
 from app.services.evaluation import load_version_source, run_and_save_evaluation
 from app.services.generation import prepare_generation
 from app.services.pdf import ocr_findings, render_draft_pdf
@@ -280,3 +280,24 @@ def download_version(version_id: str, format: str = "txt", variant: str = "draft
     ]
     return Response(render_draft_pdf(header_lines, row["content"]), media_type="application/pdf",
                     headers=headers)
+
+
+@router.get("/api/versions/{version_id}/export")
+def export_approved_version(version_id: str, format: str = "docx"):
+    """The approved version as a controlled document (DOCX or PDF): approver, approval time and
+    justification, evaluator version, source PDF and approved-text SHA-256, change log, procedure."""
+    if format not in {"docx", "pdf"}:
+        raise HTTPException(status_code=400, detail="format must be 'docx' or 'pdf'.")
+    record = exports.approved_record(version_id)
+    name = f"SafeSOP-v{record['version']['version_number']}-approved.{format}"
+    headers = {"Content-Disposition": f'attachment; filename="{name}"'}
+    if format == "docx":
+        return Response(exports.build_docx(record), headers=headers,
+                        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    return Response(exports.build_pdf(record), media_type="application/pdf", headers=headers)
+
+
+@router.get("/api/versions/{version_id}/evaluation-report.pdf")
+def evaluation_report(version_id: str):
+    return Response(exports.build_evaluation_report_pdf(version_id), media_type="application/pdf",
+                    headers={"Content-Disposition": 'attachment; filename="SafeSOP-evaluation-report.pdf"'})

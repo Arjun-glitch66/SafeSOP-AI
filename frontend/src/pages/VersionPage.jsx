@@ -1,6 +1,6 @@
 import { Link, useNavigate, useParams } from "react-router";
 import { ArrowDownToLine, ClipboardCheck, FileText, RefreshCw } from "lucide-react";
-import { downloadTranslation, downloadVersion, getReviews, getVersion } from "../api.js";
+import { downloadApproved, downloadEvaluationReport, downloadTranslation, downloadVersion, getReviews, getVersion } from "../api.js";
 import ReviewTimeline from "../components/ReviewTimeline.jsx";
 import VersionEvidence from "../components/VersionEvidence.jsx";
 import { Badge, EmptyState } from "../components/ui.jsx";
@@ -40,7 +40,12 @@ export default function VersionPage() {
 
       <div className="action-row page-actions">
         {can("reviewer") && v.status !== "approved" && <Link className="btn btn-primary" to={`/versions/${v.id}/review`}><ClipboardCheck size={16} /> Review this version</Link>}
+        {v.status === "approved" && <>
+          <button className="btn btn-primary" onClick={() => downloadApproved(v.id, v.version_number, "docx").catch((error) => show(`Download failed: ${error.message}`, "error"))}><ArrowDownToLine size={16} /> Approved document (DOCX)</button>
+          <button className="btn btn-secondary" onClick={() => downloadApproved(v.id, v.version_number, "pdf").catch((error) => show(`Download failed: ${error.message}`, "error"))}><ArrowDownToLine size={16} /> Approved document (PDF)</button>
+        </>}
         <button className="btn btn-secondary" onClick={() => download("pdf")}><ArrowDownToLine size={16} /> Draft (PDF)</button>
+        <button className="btn btn-secondary" onClick={() => downloadEvaluationReport(v.id, v.version_number).catch((error) => show(`Download failed: ${error.message}`, "error"))}><ArrowDownToLine size={16} /> Evaluation report (PDF)</button>
         <button className="btn btn-secondary" onClick={() => download("txt")}><ArrowDownToLine size={16} /> Text (.txt)</button>
         {can("author") && <button className="btn btn-secondary" onClick={() => navigate(`/documents/${v.document_id}`, { state: { parent: v } })}><RefreshCw size={16} /> Regenerate from original</button>}
       </div>
