@@ -58,7 +58,7 @@ export default function ReviewPage() {
         </div>
       </div>
 
-      <VersionEvidence versionId={v.id} onEvaluated={version.reload} />
+      <VersionEvidence versionId={v.id} documentId={v.document_id} onEvaluated={version.reload} />
       <ReviewTimeline reviews={reviews} status={v.status} />
 
       <section className="panel" aria-labelledby="decision-heading">

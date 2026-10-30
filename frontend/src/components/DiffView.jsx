@@ -11,17 +11,17 @@ const lineId = (side, line) => `diff-${side}-${line}`;
 // Side-by-side original vs draft. Source warning lines are marked so a reviewer
 // can see at a glance whether each one survived. Every line has an id built from the
 // same 1-based numbering the evaluator uses, so a finding can point at it (`highlight`).
-export default function DiffView({ versionId, highlight }) {
+export default function DiffView({ versionId, against = "", highlight }) {
   const [diff, setDiff] = useState(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
-    getVersionDiff(versionId)
+    getVersionDiff(versionId, against)
       .then((result) => { if (!cancelled) setDiff(result); })
       .catch((err) => { if (!cancelled) setError(err.message); });
     return () => { cancelled = true; };
-  }, [versionId]);
+  }, [versionId, against]);
 
   useEffect(() => {
     if (!diff || !highlight) return;
@@ -53,7 +53,7 @@ export default function DiffView({ versionId, highlight }) {
   return (
     <div className="diff-view" role="table" aria-label="Original compared with draft">
       <div className="diff-row diff-head" role="row">
-        <div role="columnheader">Original PDF text</div>
+        <div role="columnheader">{diff.left_label || "Original PDF text"}</div>
         <div role="columnheader">Generated draft · {Math.round(diff.similarity * 100)}% similar</div>
       </div>
       {diff.blocks.map((block, index) => (

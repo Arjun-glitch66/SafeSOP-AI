@@ -98,11 +98,21 @@ def evaluate_version(version_id: str):
 
 
 @router.get("/api/versions/{version_id}/diff")
-def diff_version(version_id: str):
-    """Line diff of the original text against the draft section, for side-by-side review."""
+def diff_version(version_id: str, against: str | None = None):
+    """Line diff for side-by-side review: the original PDF text (default) or, with
+    against=<version id>, an earlier draft of the same document, on the left; this draft on the right."""
     row, original_text = load_version_source(version_id)
     draft, _ = extract_draft_section(row["content"])
-    original_lines = text_lines(original_text)
+    left_text, left_label = original_text, "Original PDF text"
+    if against:
+        with connect_db() as connection:
+            other = connection.execute(
+                "SELECT content, version_number, document_id FROM versions WHERE id = ?", (against,)).fetchone()
+            this = connection.execute("SELECT document_id FROM versions WHERE id = ?", (version_id,)).fetchone()
+        if not other or other["document_id"] != this["document_id"]:
+            raise HTTPException(status_code=400, detail="against must be another version of the same document.")
+        left_text, left_label = extract_draft_section(other["content"])[0], f"Version {other['version_number']}"
+    original_lines = text_lines(left_text)
     draft_lines = text_lines(draft)
 
     blocks = []
@@ -113,8 +123,10 @@ def diff_version(version_id: str):
                        "original_start": i1 + 1, "draft_start": j1 + 1})
     return {
         "version_id": version_id,
+        "against": against,
+        "left_label": left_label,
         "blocks": blocks,
-        "source_warnings": extract_warnings(original_text),
+        "source_warnings": extract_warnings(left_text),
         "similarity": round(matcher.ratio(), 4),
     }
 

@@ -978,3 +978,19 @@ def test_evaluation_report_pdf(client):
     with pymupdf.open(stream=report.content, filetype="pdf") as document:
         text = " ".join(page.get_text() for page in document)
     assert "Automated evaluation report" in text and "missing warning" in text and "never approve" in text
+
+
+# --- 3.13 version-to-version comparison ---
+
+def test_diff_against_another_version_of_the_same_document(client):
+    doc_id = upload_two_page_pdf(client)
+    v1 = generate(client, doc_id, description="use torque 20Nm").json()
+    v2 = generate(client, doc_id, description="use torque 25Nm").json()
+    diff = client.get(f"/api/versions/{v2['version_id']}/diff?against={v1['version_id']}").json()
+    assert diff["left_label"] == "Version 1"
+    assert [b["original"] for b in diff["blocks"] if b["tag"] != "equal"] == [["REVISED (full) use torque 20Nm"]]
+    assert client.get(f"/api/versions/{v2['version_id']}/diff").json()["left_label"] == "Original PDF text"
+
+    other_doc = upload_two_page_pdf(client)
+    foreign = generate(client, other_doc, description="x").json()
+    assert client.get(f"/api/versions/{v2['version_id']}/diff?against={foreign['version_id']}").status_code == 400

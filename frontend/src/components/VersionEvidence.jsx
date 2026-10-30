@@ -1,22 +1,26 @@
 import { useState } from "react";
 import { RefreshCw, ThumbsDown, ThumbsUp } from "lucide-react";
-import { getEvaluations, getVersionContent, runEvaluation, setFindingFeedback } from "../api.js";
+import { getDocumentVersions, getEvaluations, getVersionContent, runEvaluation, setFindingFeedback } from "../api.js";
 import { useAuth, useNotice, useResource } from "../state.jsx";
 import DiffView from "./DiffView.jsx";
 import EvaluationReport from "./EvaluationReport.jsx";
+import OriginalPdfPreview from "./OriginalPdfPreview.jsx";
 
 const TABS = [["diff", "Compare with original"], ["text", "Full model output"]];
 
 // The evidence a reviewer needs: the latest automated evaluation and the side-by-side
 // comparison. "Show in comparison" on a finding switches to the comparison and highlights
 // the line the finding quotes.
-export default function VersionEvidence({ versionId, onEvaluated }) {
+export default function VersionEvidence({ versionId, documentId, onEvaluated }) {
   const { show } = useNotice();
   const { user, can } = useAuth();
   const evaluations = useResource(() => getEvaluations(versionId), [versionId]);
   const content = useResource(() => getVersionContent(versionId), [versionId]);
   const [view, setView] = useState("diff");
   const [highlight, setHighlight] = useState(null);
+  const [against, setAgainst] = useState("");  // "" = the original PDF text
+  const [pdfPage, setPdfPage] = useState(null);  // null = preview closed
+  const siblings = useResource(() => getDocumentVersions(documentId), [documentId]);
   const [evaluating, setEvaluating] = useState(false);
   const evaluation = evaluations.data?.[0] || null;
 
@@ -58,6 +62,8 @@ export default function VersionEvidence({ versionId, onEvaluated }) {
 
   function showInComparison(finding) {
     setView("diff");
+    setAgainst("");  // finding line numbers refer to the original
+    if (finding.source_page) setPdfPage(finding.source_page);
     setHighlight(finding.draft_line ? { side: "draft", line: finding.draft_line, at: Date.now() }
       : { side: "original", line: finding.source_line, at: Date.now() });
   }
@@ -90,9 +96,21 @@ export default function VersionEvidence({ versionId, onEvaluated }) {
               className={view === tab ? "active" : ""} onClick={() => setView(tab)}>{label}</button>
           ))}
         </div>
+        <div className="compare-bar">
+          <label className="field-label" htmlFor="compare-with">Compare with</label>
+          <select id="compare-with" className="form-input" value={against} onChange={(event) => { setAgainst(event.target.value); setView("diff"); }}>
+            <option value="">Original PDF</option>
+            {(siblings.data || []).filter((other) => other.id !== versionId).map((other) => (
+              <option key={other.id} value={other.id}>Version {other.version_number}</option>
+            ))}
+          </select>
+          <button className="btn btn-secondary" aria-expanded={pdfPage !== null} onClick={() => setPdfPage(pdfPage === null ? 1 : null)}>{pdfPage === null ? "Show original PDF" : "Hide original PDF"}</button>
+        </div>
+        {pdfPage !== null && <OriginalPdfPreview documentId={documentId} page={pdfPage} />}
         <div role="tabpanel" id={`tabpanel-${view}`} aria-labelledby={`tab-${view}`} tabIndex={0}>
+          {/* key remounts the diff per comparison, so it never shows a previous result or error */}
           {view === "diff"
-            ? <DiffView key={versionId} versionId={versionId} highlight={highlight} />
+            ? <DiffView key={`${versionId}-${against}`} versionId={versionId} against={against} highlight={against ? null : highlight} />
             : <pre className="draft-output">{content.data ?? (content.error ? `Could not load: ${content.error.message}` : "Loading version content...")}</pre>}
         </div>
       </section>

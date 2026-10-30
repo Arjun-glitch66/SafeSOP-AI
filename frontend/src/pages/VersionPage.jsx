@@ -50,7 +50,7 @@ export default function VersionPage() {
         {can("author") && <button className="btn btn-secondary" onClick={() => navigate(`/documents/${v.document_id}`, { state: { parent: v } })}><RefreshCw size={16} /> Regenerate from original</button>}
       </div>
 
-      <VersionEvidence versionId={v.id} onEvaluated={version.reload} />
+      <VersionEvidence versionId={v.id} documentId={v.document_id} onEvaluated={version.reload} />
       {v.translated_content && <section className="panel" aria-labelledby="translation-heading">
         <div className="panel-heading">
           <div><h2 id="translation-heading">{LANGUAGES[v.output_language]} translation</h2><p>Machine translation of this draft, checked by an independent back-translation (findings marked "translation" above). A native-speaker reviewer must read it; the English draft is the controlled text.</p></div>

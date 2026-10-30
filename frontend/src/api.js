@@ -139,7 +139,10 @@ export async function followJob(jobId, onProgress, signal) {
 // ---- versions ----
 export const getVersion = (versionId) => request(`/api/versions/${id(versionId)}`);
 export const getVersionContent = async (versionId) => (await request(`/api/versions/${id(versionId)}/content`)).content;
-export const getVersionDiff = (versionId) => request(`/api/versions/${id(versionId)}/diff`);
+// against: another version of the same document; default is the original PDF text.
+export const getVersionDiff = (versionId, against = "") =>
+  request(`/api/versions/${id(versionId)}/diff${against ? `?against=${id(against)}` : ""}`);
+export const fetchOriginalBlob = async (documentId) => (await send(`/api/documents/${id(documentId)}/original`)).blob();
 export const getEvaluations = async (versionId) => (await request(`/api/versions/${id(versionId)}/evaluations`)).evaluations;
 export const runEvaluation = (versionId) => request(`/api/versions/${id(versionId)}/evaluate`, { method: "POST" });
 export const getReviews = async (versionId) => (await request(`/api/versions/${id(versionId)}/reviews`)).reviews;
