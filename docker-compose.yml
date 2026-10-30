@@ -1,0 +1,41 @@
+# Local production-like stack: Postgres, the API and the nginx-served frontend.
+#   cp .env.example .env   (then fill in the secrets)
+#   docker compose up --build        ->  http://localhost:8080
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: safesop
+      POSTGRES_USER: safesop
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U safesop -d safesop"]
+      interval: 5s
+      retries: 10
+
+  backend:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://safesop:${POSTGRES_PASSWORD}@db:5432/safesop
+      SAFESOP_DATA_DIR: /data
+      LOG_FORMAT: json
+      ALLOWED_ORIGINS: http://localhost:8080
+    volumes:
+      - pdf-data:/data
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+
+volumes:
+  db-data:
+  pdf-data:

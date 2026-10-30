@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException
 
 from app import config
 from app.audit import append_audit
+from app.pagination import page_params, paginate
 from app.auth import check_password, password_hash_of, require_role
 from app.db import connect_db, now
 from app.schemas import LOCKED_DETAIL, LOCKED_STATUSES, REVIEW_DECISIONS
@@ -41,7 +42,7 @@ def create_review(
     review_id = str(uuid.uuid4())
     created = now()
     with connect_db() as connection:
-        connection.execute("BEGIN IMMEDIATE")  # status check, update and audit event in one transaction
+        connection.lock_writes()  # status check, update and audit event in one transaction
         version = connection.execute(
             """SELECT v.status, v.created_by, v.content, d.sha256 AS source_sha256
                FROM versions v JOIN documents d ON d.id = v.document_id WHERE v.id = ?""", (version_id,)
@@ -107,14 +108,10 @@ def create_review(
 
 
 @router.get("/api/versions/{version_id}/reviews")
-def list_reviews(version_id: str):
+def list_reviews(version_id: str, page=Depends(page_params)):
     with connect_db() as connection:
-        rows = connection.execute(
-            """
+        return paginate(connection, """
             SELECT * FROM review_history
             WHERE version_id = ?
-            ORDER BY created_at DESC
-            """,
-            (version_id,),
-        ).fetchall()
-    return {"reviews": [dict(row) for row in rows]}
+            ORDER BY created_at DESC, id
+            """, (version_id,), page, "reviews")

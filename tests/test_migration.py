@@ -62,3 +62,41 @@ def test_legacy_streamlit_schema_is_refused_not_modified(temp_db):
     with sqlite3.connect(api.DB_PATH) as connection:
         tables = {r[0] for r in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert tables == {"documents"}
+
+
+def schema(db_path):
+    with sqlite3.connect(db_path) as connection:
+        tables = [r[0] for r in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")]
+        columns = {t: sorted(r[1] for r in connection.execute(f"PRAGMA table_info({t})")) for t in tables}
+        indexes = sorted(r[0] for r in connection.execute("SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'ix_%'"))
+        triggers = sorted(r[0] for r in connection.execute("SELECT name FROM sqlite_master WHERE type='trigger'"))
+        version = connection.execute("SELECT version_num FROM alembic_version").fetchone()[0]
+    return columns, indexes, triggers, version
+
+
+def test_legacy_upgrade_and_a_fresh_alembic_database_have_the_same_schema(temp_db, monkeypatch, tmp_path):
+    with sqlite3.connect(api.DB_PATH) as connection:
+        connection.executescript(OLD_SCHEMA)
+    api.init_db()
+    upgraded = schema(api.DB_PATH)
+
+    monkeypatch.setattr(api, "DB_PATH", tmp_path / "fresh.db")
+    api.init_db()
+    assert schema(api.DB_PATH) == upgraded
+    columns, indexes, triggers, version = upgraded
+    assert version == "0003_relative_paths" and "ix_versions_document_id" in indexes
+    assert triggers == ["audit_events_no_delete", "audit_events_no_update"]
+
+
+def test_stored_paths_inside_the_data_folder_become_relative(temp_db, monkeypatch):
+    monkeypatch.setattr(api, "DATA_DIR", temp_db)
+    inside, outside = temp_db / "originals" / "doc1.pdf", "C:/elsewhere/doc2.pdf"
+    with sqlite3.connect(api.DB_PATH) as connection:
+        connection.executescript(OLD_SCHEMA.replace("'x.pdf'", f"'{inside.as_posix()}'"))
+        connection.execute("INSERT INTO documents VALUES ('doc2', 'b.pdf', ?, 'def', 10, '2026-10-01')", (outside,))
+    api.init_db()
+    with sqlite3.connect(api.DB_PATH) as connection:
+        paths = dict(connection.execute("SELECT id, stored_path FROM documents"))
+    assert paths == {"doc1": "originals/doc1.pdf", "doc2": outside}
+    assert api.resolve(paths["doc1"]) == temp_db / "originals" / "doc1.pdf"

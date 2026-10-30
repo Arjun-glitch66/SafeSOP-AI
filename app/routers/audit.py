@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends
 from app.audit import verify_chain
 from app.auth import require_role
 from app.db import connect_db
+from app.pagination import page_params, paginate
 
 router = APIRouter()
 
@@ -18,7 +19,8 @@ def verify_audit_log():
 
 
 @router.get("/api/audit")
-def list_audit_events(limit: int = 200, _admin=Depends(require_role("admin"))):
+def list_audit_events(page=Depends(page_params), _admin=Depends(require_role("admin"))):
     with connect_db() as connection:
-        rows = connection.execute("SELECT * FROM audit_events ORDER BY seq DESC LIMIT ?", (min(limit, 1000),)).fetchall()
-    return {"events": [{**dict(row), "payload": json.loads(row["payload_json"])} for row in rows]}
+        listed = paginate(connection, "SELECT * FROM audit_events ORDER BY seq DESC", (), page, "events")
+    listed["events"] = [{**event, "payload": json.loads(event["payload_json"])} for event in listed["events"]]
+    return listed

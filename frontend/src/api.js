@@ -1,5 +1,6 @@
 // Set VITE_API_BASE in frontend/.env.local to point at a different backend.
-const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
+// An empty VITE_API_BASE (the Docker build) means same origin: nginx proxies /api to the backend.
+const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
 const TOKEN_KEY = "safesop.token";
 
 // Storage can be blocked (private mode, policies); signing in then lasts until the tab closes.

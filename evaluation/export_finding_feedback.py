@@ -1,7 +1,7 @@
 """
 Turn reviewers' "true problem" / "false alarm" verdicts on automated findings into labelled rows.
 
-    .venv\\Scripts\\python evaluation\\export_finding_feedback.py [--db data\\safesop.db] [--out results\\finding_feedback_labels.csv]
+    .venv\\Scripts\\python evaluation\\export_finding_feedback.py [--out results\\finding_feedback_labels.csv]
 
 One row per finding that at least one reviewer labelled. `label` is the verdict when every
 reviewer agrees, else `disputed` (resolve by discussion before using it, as in docs/BENCHMARK.md).
@@ -12,7 +12,6 @@ label); that still needs the EXP-003 draft-item annotation.
 import argparse
 import csv
 import json
-import sqlite3
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -25,19 +24,19 @@ FIELDS = ["version_id", "document_id", "evaluation_id", "evaluator_version", "mo
           "draft_line", "verdicts", "label"]
 
 
-def export(db_path, out_path):
-    connection = sqlite3.connect(db_path)
-    connection.row_factory = sqlite3.Row
-    rows = connection.execute(
-        """SELECT f.evaluation_id, f.finding_index, f.verdict, f.user, e.findings_json, e.evaluator_version,
-                  v.id AS version_id, v.document_id, v.model, v.prompt_version, d.sha256 AS source_sha256
-           FROM finding_feedback f
-           JOIN evaluations e ON e.id = f.evaluation_id
-           JOIN versions v ON v.id = e.version_id
-           JOIN documents d ON d.id = v.document_id
-           ORDER BY v.created_at, f.evaluation_id, f.finding_index, f.user"""
-    ).fetchall()
-    connection.close()
+def export(out_path):
+    """Reads the database the API uses (DATABASE_URL, or the SQLite file under the data folder)."""
+    from app.db import connect_db
+    with connect_db() as connection:
+        rows = connection.execute(
+            """SELECT f.evaluation_id, f.finding_index, f.verdict, f."user", e.findings_json, e.evaluator_version,
+                      v.id AS version_id, v.document_id, v.model, v.prompt_version, d.sha256 AS source_sha256
+               FROM finding_feedback f
+               JOIN evaluations e ON e.id = f.evaluation_id
+               JOIN versions v ON v.id = e.version_id
+               JOIN documents d ON d.id = v.document_id
+               ORDER BY v.created_at, f.evaluation_id, f.finding_index, f."user\""""
+        ).fetchall()
 
     grouped = defaultdict(list)
     for row in rows:
@@ -79,12 +78,10 @@ def export(db_path, out_path):
 
 
 def main():
-    from app import config
     parser = argparse.ArgumentParser()
-    parser.add_argument("--db", default=str(config.DB_PATH))
     parser.add_argument("--out", default=str(ROOT / "results" / "finding_feedback_labels.csv"))
     args = parser.parse_args()
-    summary = export(args.db, args.out)
+    summary = export(args.out)
     print(f"{summary['labelled_findings']} labelled findings ({summary['disputed']} disputed) -> {args.out}")
     for kind, precision in summary["precision_by_type"].items():
         print(f"  {kind}: precision {precision}")

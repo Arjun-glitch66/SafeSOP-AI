@@ -49,7 +49,7 @@ def create_user(username, password, role, created_by):
     user = {"id": str(uuid.uuid4()), "username": username, "role": role}
     password_hash = hash_password(password)
     with connect_db() as connection:
-        connection.execute("BEGIN IMMEDIATE")
+        connection.lock_writes()
         if connection.execute("SELECT 1 FROM users WHERE username = ?", (username,)).fetchone():
             raise HTTPException(status_code=409, detail="That username is taken.")
         connection.execute(

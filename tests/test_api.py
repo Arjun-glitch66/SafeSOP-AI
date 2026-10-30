@@ -628,7 +628,7 @@ def test_finding_feedback_export_makes_benchmark_rows(client, tmp_path):
         client.put(url, data={"verdict": rob}, headers=sign_in(client, "rob"))
 
     out = tmp_path / "labels.csv"
-    summary = export(api.DB_PATH, out)
+    summary = export(out)
     rows = list(csv.DictReader(out.open(encoding="utf-8")))
     assert [r["label"] for r in rows] == ["true_problem", "disputed"]
     assert rows[0]["finding_type"] == version["safety_evaluation"]["findings"][0]["type"]
@@ -750,3 +750,35 @@ def test_generate_has_a_daily_quota(client, monkeypatch):
     assert over.status_code == 429 and "Daily generation quota" in over.json()["detail"]
     assert int(over.headers["Retry-After"]) <= 86400
     assert client.prompts and len(client.prompts) == 2  # the refused call never reached the model
+
+
+# --- 3.5 operations: health, paging, structured logs ---
+
+def test_liveness_and_readiness(client, monkeypatch):
+    anonymous = {"Authorization": ""}
+    assert client.get("/healthz", headers=anonymous).json() == {"status": "alive"}
+    ready = client.get("/readyz", headers=anonymous)
+    assert ready.status_code == 200 and ready.json() == {"status": "ready", "database": "ok", "storage": "ok"}
+    monkeypatch.setattr(api, "DB_PATH", api.UPLOAD_DIR / "missing-folder" / "x.db")  # cannot be opened
+    not_ready = client.get("/readyz", headers=anonymous)
+    assert not_ready.status_code == 503 and not_ready.json()["database"].startswith("error")
+
+
+def test_list_endpoints_are_paged(client):
+    for _ in range(3):
+        upload_two_page_pdf(client)
+    first = client.get("/api/documents?limit=2").json()
+    second = client.get("/api/documents?limit=2&offset=2").json()
+    assert (first["total"], first["limit"], len(first["documents"]), len(second["documents"])) == (3, 2, 2, 1)
+    assert {d["id"] for d in first["documents"]}.isdisjoint(d["id"] for d in second["documents"])
+    assert client.get("/api/documents?limit=0").status_code == 422
+    assert client.get("/api/documents?limit=501").status_code == 422
+
+
+def test_json_log_lines_carry_extra_fields():
+    import logging
+    from app.logging_setup import JsonFormatter
+    record = logging.LogRecord("safesop.access", logging.INFO, "", 0, "request", (), None)
+    record.path, record.status = "/api/documents", 200
+    line = json.loads(JsonFormatter().format(record))
+    assert (line["message"], line["path"], line["status"], line["level"]) == ("request", "/api/documents", 200, "INFO")

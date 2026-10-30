@@ -38,6 +38,15 @@ MIN_PASSWORD_LENGTH = 10
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 
+def database_url():
+    """DATABASE_URL (e.g. postgresql+psycopg://user:pass@db/safesop), else the SQLite file DB_PATH.
+    Read at call time so tests can point DB_PATH at a temporary file."""
+    if os.getenv("DATABASE_URL"):
+        return os.environ["DATABASE_URL"]
+    from sqlalchemy.engine import URL
+    return URL.create("sqlite", database=str(DB_PATH)).render_as_string(hide_password=False)
+
+
 DEFAULT_ALLOWED_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"
 
 

@@ -1,0 +1,11 @@
+.git
+.venv
+.env
+.env.*
+.gstack
+data
+results/raw
+legacy
+frontend
+**/__pycache__
+.pytest_cache

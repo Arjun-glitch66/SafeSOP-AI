@@ -2,17 +2,17 @@
 import hashlib
 import json
 import logging
-import sqlite3
 import uuid
-from pathlib import Path
 
 from fastapi import HTTPException
+from sqlalchemy.exc import IntegrityError
 
 from app import config
 from app.audit import append_audit
 from app.db import connect_db, now
 from app.services.evaluation import run_and_save_evaluation
 from app.services.pdf import extract_document_text
+from app.storage import resolve
 from src.sop_generator import generate_sop
 
 logger = logging.getLogger("safesop")
@@ -90,7 +90,7 @@ def prepare_generation(document_id, description, scope, target_page, parent_vers
     if scope not in {"full", "page"}:
         raise HTTPException(status_code=400, detail="Scope must be 'full' or 'page'.")
 
-    original_path = Path(document["stored_path"])
+    original_path = resolve(document["stored_path"])
     if not original_path.is_file():
         raise HTTPException(status_code=404, detail="Original PDF file is missing.")
 
@@ -231,14 +231,14 @@ def run_generation(prepared, progress=lambda stage: None):
 def insert_numbered_version(document_id, values, audit, attempts=3):
     """Insert a version as MAX(version_number) + 1 and return that number.
 
-    BEGIN IMMEDIATE takes SQLite's write lock before the MAX() read, so concurrent
+    lock_writes() (BEGIN IMMEDIATE / an advisory lock) is taken before the MAX() read, so concurrent
     generations (each already paid for) are numbered one after another instead of
     colliding. UNIQUE(document_id, version_number) is the backstop; retry if it fires.
     """
     for attempt in range(attempts):
         connection = connect_db()
         try:
-            connection.execute("BEGIN IMMEDIATE")
+            connection.lock_writes()
             next_version = connection.execute(
                 "SELECT COALESCE(MAX(version_number), 0) + 1 FROM versions WHERE document_id = ?",
                 (document_id,),
@@ -258,9 +258,9 @@ def insert_numbered_version(document_id, values, audit, attempts=3):
                          {**audit["payload"], "version_number": next_version})
             connection.commit()
             return next_version
-        except sqlite3.IntegrityError as exc:
+        except IntegrityError as exc:
             connection.rollback()
-            if "UNIQUE" not in str(exc) or attempt == attempts - 1:
+            if "UNIQUE" not in str(exc).upper() or attempt == attempts - 1:
                 raise
         finally:
             connection.close()

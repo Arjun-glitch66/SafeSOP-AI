@@ -5,7 +5,7 @@ or reordering any past event breaks every hash after it. SQLite triggers refuse 
 DELETE on the table; verify_chain() catches tampering that bypasses them (e.g. editing the file).
 
 Events are written with the caller's connection, inside the same transaction as the change
-they record. Callers start that transaction with BEGIN IMMEDIATE so two writers cannot read
+they record. Callers start that transaction with connection.lock_writes() so two writers cannot read
 the same chain head; UNIQUE(prev_hash) is the backstop.
 """
 import hashlib
@@ -36,7 +36,7 @@ def append_audit(connection, user, action, entity, entity_id, payload):
     }
     event["hash"] = event_hash(event)
     connection.execute(
-        """INSERT INTO audit_events (id, ts, user, action, entity, entity_id, payload_json, prev_hash, hash)
+        """INSERT INTO audit_events (id, ts, "user", action, entity, entity_id, payload_json, prev_hash, hash)
            VALUES (:id, :ts, :user, :action, :entity, :entity_id, :payload_json, :prev_hash, :hash)""",
         event,
     )

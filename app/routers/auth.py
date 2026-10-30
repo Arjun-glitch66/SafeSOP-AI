@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.auth import authenticate, create_user, current_user, issue_token, require_role
 from app.db import connect_db
+from app.pagination import page_params, paginate
 from app.schemas import LoginRequest, NewUser
 
 router = APIRouter()
@@ -27,7 +28,7 @@ def add_user(body: NewUser, admin=Depends(require_role("admin"))):
 
 
 @router.get("/api/users")
-def list_users(_admin=Depends(require_role("admin"))):
+def list_users(page=Depends(page_params), _admin=Depends(require_role("admin"))):
     with connect_db() as connection:
-        rows = connection.execute("SELECT id, username, role, created_at FROM users ORDER BY username").fetchall()
-    return {"users": [dict(row) for row in rows]}
+        return paginate(connection, "SELECT id, username, role, created_at FROM users ORDER BY username",
+                        (), page, "users")

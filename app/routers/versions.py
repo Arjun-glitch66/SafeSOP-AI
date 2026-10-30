@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from app import config
 from app.auth import require_role
+from app.pagination import page_params, paginate
 from app.limits import check_generate_allowed
 from app.schemas import FINDING_VERDICTS
 from app.db import connect_db, now
@@ -111,19 +112,17 @@ def diff_version(version_id: str):
 
 
 @router.get("/api/versions/{version_id}/evaluations")
-def list_evaluations(version_id: str):
+def list_evaluations(version_id: str, page=Depends(page_params)):
     with connect_db() as connection:
-        rows = connection.execute(
-            """
+        listed = paginate(connection, """
             SELECT * FROM evaluations
             WHERE version_id = ?
-            ORDER BY created_at DESC
-            """,
-            (version_id,),
-        ).fetchall()
+            ORDER BY created_at DESC, id
+            """, (version_id,), page, "evaluations")
+        rows = listed.pop("evaluations")
 
         verdicts = connection.execute(
-            """SELECT f.evaluation_id, f.finding_index, f.verdict, f.user FROM finding_feedback f
+            """SELECT f.evaluation_id, f.finding_index, f.verdict, f."user" FROM finding_feedback f
                JOIN evaluations e ON e.id = f.evaluation_id WHERE e.version_id = ? ORDER BY f.created_at""",
             (version_id,),
         ).fetchall()
@@ -137,7 +136,7 @@ def list_evaluations(version_id: str):
             finding["feedback"] = [{"verdict": v["verdict"], "user": v["user"]} for v in verdicts
                                    if v["evaluation_id"] == item["id"] and v["finding_index"] == index]
         evaluations.append(item)
-    return {"evaluations": evaluations}
+    return {"evaluations": evaluations, **listed}
 
 
 @router.put("/api/evaluations/{evaluation_id}/findings/{finding_index}/feedback")
@@ -155,9 +154,9 @@ def set_finding_feedback(evaluation_id: str, finding_index: int, verdict: str = 
         if not 0 <= finding_index < len(findings):
             raise HTTPException(status_code=404, detail="Finding not found.")
         connection.execute(
-            """INSERT INTO finding_feedback (id, evaluation_id, finding_index, finding_type, verdict, user, created_at)
+            """INSERT INTO finding_feedback (id, evaluation_id, finding_index, finding_type, verdict, "user", created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?)
-               ON CONFLICT(evaluation_id, finding_index, user)
+               ON CONFLICT(evaluation_id, finding_index, "user")
                DO UPDATE SET verdict = excluded.verdict, created_at = excluded.created_at""",
             (str(uuid.uuid4()), evaluation_id, finding_index, findings[finding_index]["type"], verdict,
              user["username"], now()),
@@ -166,7 +165,7 @@ def set_finding_feedback(evaluation_id: str, finding_index: int, verdict: str = 
 
 
 @router.get("/api/documents/{document_id}/versions")
-def list_versions(document_id: str):
+def list_versions(document_id: str, page=Depends(page_params)):
     with connect_db() as connection:
         exists = connection.execute(
             "SELECT id FROM documents WHERE id = ?",
@@ -175,8 +174,7 @@ def list_versions(document_id: str):
         if not exists:
             raise HTTPException(status_code=404, detail="Document not found.")
 
-        rows = connection.execute(
-            """
+        return paginate(connection, """
             SELECT v.id, v.document_id, v.request_id, v.version_number, v.status,
                    v.created_at, length(v.content) AS characters,
                    v.source_document_id, v.parent_version_id, v.target_page,
@@ -189,10 +187,7 @@ def list_versions(document_id: str):
             LEFT JOIN change_requests cr ON cr.id = v.request_id
             WHERE v.document_id = ?
             ORDER BY v.version_number DESC
-            """,
-            (document_id,),
-        ).fetchall()
-    return {"versions": [dict(row) for row in rows]}
+            """, (document_id,), page, "versions")
 
 
 @router.get("/api/versions/{version_id}")

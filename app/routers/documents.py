@@ -11,6 +11,8 @@ from fastapi.responses import FileResponse
 from app import config
 from app.audit import append_audit
 from app.auth import require_role
+from app.pagination import page_params, paginate
+from app.storage import resolve, to_stored_path
 from app.db import connect_db, now
 
 logger = logging.getLogger("safesop")
@@ -18,18 +20,15 @@ router = APIRouter()
 
 
 @router.get("/api/documents")
-def list_documents():
+def list_documents(page=Depends(page_params)):
     with connect_db() as connection:
-        rows = connection.execute(
-            """
+        return paginate(connection, """
             SELECT d.id, d.filename, d.sha256, d.size_bytes, d.created_at,
                    (SELECT COUNT(*) FROM versions v
                     WHERE v.document_id = d.id) AS version_count
             FROM documents d
-            ORDER BY d.created_at DESC
-            """
-        ).fetchall()
-    return {"documents": [dict(row) for row in rows]}
+            ORDER BY d.created_at DESC, d.id
+            """, (), page, "documents")
 
 
 @router.post("/api/documents/upload")
@@ -81,7 +80,7 @@ async def upload_document(file: UploadFile = File(...), user=Depends(require_rol
         file_hash = digest.hexdigest()
 
         with connect_db() as connection:
-            connection.execute("BEGIN IMMEDIATE")  # audit chain head is read in this transaction
+            connection.lock_writes()  # audit chain head is read in this transaction
             connection.execute(
                 """
                 INSERT INTO documents
@@ -91,7 +90,7 @@ async def upload_document(file: UploadFile = File(...), user=Depends(require_rol
                 (
                     document_id,
                     filename,
-                    str(stored_path),
+                    to_stored_path(stored_path),
                     file_hash,
                     size,
                     created,
@@ -146,7 +145,7 @@ def get_document(document_id: str):
     if result["page_count"] is None:
         # Documents uploaded before page_count existed: count once, then store it.
         try:
-            with pymupdf.open(stored_path) as pdf:
+            with pymupdf.open(resolve(stored_path)) as pdf:
                 result["page_count"] = len(pdf)
             with connect_db() as connection:
                 connection.execute("UPDATE documents SET page_count = ? WHERE id = ?",
@@ -166,7 +165,7 @@ def download_original(document_id: str):
 
     if not row:
         raise HTTPException(status_code=404, detail="Document not found.")
-    path = Path(row["stored_path"])
+    path = resolve(row["stored_path"])
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Original PDF file is missing.")
 

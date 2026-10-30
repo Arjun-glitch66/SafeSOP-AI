@@ -8,6 +8,7 @@ from fastapi import HTTPException
 
 from app.db import connect_db, now
 from app.services.pdf import extract_document_text
+from app.storage import resolve
 from src.safety_evaluator import evaluate_revision, evaluate_structured_revision, text_lines
 from src.semantic_checker import apply_semantic_check
 
@@ -95,5 +96,5 @@ def load_version_source(version_id):
             status_code=422,
             detail="This page-scoped version predates page tracking, so its source page is unknown.",
         )
-    original_text, _ = extract_document_text(row["stored_path"], scope, row["target_page"])
+    original_text, _ = extract_document_text(str(resolve(row["stored_path"])), scope, row["target_page"])
     return row, original_text

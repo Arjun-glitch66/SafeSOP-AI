@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException
 
 from app import config
 from app.auth import require_role
+from app.pagination import page_params, paginate
 from app.db import connect_db, now
 
 router = APIRouter()
@@ -70,7 +71,7 @@ def create_change_request(
 
 
 @router.get("/api/documents/{document_id}/requests")
-def list_change_requests(document_id: str):
+def list_change_requests(document_id: str, page=Depends(page_params)):
     with connect_db() as connection:
         exists = connection.execute(
             "SELECT id FROM documents WHERE id = ?",
@@ -79,12 +80,8 @@ def list_change_requests(document_id: str):
         if not exists:
             raise HTTPException(status_code=404, detail="Document not found.")
 
-        rows = connection.execute(
-            """
+        return paginate(connection, """
             SELECT * FROM change_requests
             WHERE document_id = ?
-            ORDER BY created_at DESC
-            """,
-            (document_id,),
-        ).fetchall()
-    return {"requests": [dict(row) for row in rows]}
+            ORDER BY created_at DESC, id
+            """, (document_id,), page, "requests")
