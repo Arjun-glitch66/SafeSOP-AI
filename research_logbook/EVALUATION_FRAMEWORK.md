@@ -1,11 +1,12 @@
-# SAFE-SOP Evaluation Framework (v1.2)
+# SAFE-SOP Evaluation Framework (v1.3)
 
-Implementation: `src/safety_evaluator.py` → `evaluate_revision()` · version tag `safe-sop-eval-1.2`
+Implementation: `src/safety_evaluator.py` → `evaluate_revision()` · version tag `safe-sop-eval-1.3`
 
 | Version | Change | Evidence |
 |---|---|---|
 | 1.0 | §2.1–2.4 as first defined | EXP-001 (logbook entry 2) |
 | 1.1 | Added the opposite-word check (§2.5) and the number+unit check (§2.4); merged steps are no longer counted as an order reversal (§2.3) | EXP-001b (logbook entry 4) |
+| 1.3 | Required-element checklists per SOP type (§2.8) and hierarchy-of-controls downgrades (§2.8); EXP-001c unchanged (0.938) | Logbook entry 11 |
 | 1.2 | Added warning-contradiction, quantifier, actor and change-applied checks (§2.6); `all`, `any`, `each`, `before`, `after` are no longer stop-words; new `high` severity | EXP-001c (logbook entry 9) |
 
 This framework checks an AI-generated SOP draft against the **immutable original SOP** and the **engineer's change request**. It does not decide whether a procedure is safe. It decides whether the draft shows evidence of specific, well-defined failure types. Only a qualified human reviewer can approve a draft.
@@ -128,6 +129,15 @@ From prompt v3 the source's warnings and steps are numbered (W1…, S1…) in th
 | Every kept step, including `added` ones, against every source prohibition | `contradicts_warning` (§2.6) |
 
 Opposite words, quantifier, actor, value, unit, duplicate, order and change-applied checks are the same as in the text path, run on the cited pairs and on the rendered draft. Versions without stored JSON (prompt v1/v2) keep the text path.
+
+### 2.8 Required elements and hierarchy of controls (v1.3)
+
+| Finding | Severity | Rule |
+|---|---|---|
+| `missing_required_element` | critical | Only when the document has a `document_type`. Each type has a YAML rule pack in `src/checklists/` (lockout/tagout; OSHA 1910.119(f)-style operating procedures) listing required elements as regex patterns. An element found in the original but in no draft line is a critical finding quoting the original line. Elements the original lacks are reported in `metrics.required_elements`, not as findings. |
+| `control_downgraded` | high (review if the change request names the weaker control) | In a matched source/draft line, every elimination, substitution or engineering control term (guard, interlock, enclosure, local exhaust ventilation, isolation, emergency stop, …) disappears and an administrative instruction (training, signs, "take care", supervision, permit) or PPE term appears. |
+
+Both are word lists: a reworded element or control can be missed, or flagged for review.
 
 ## 3. Decision rule
 

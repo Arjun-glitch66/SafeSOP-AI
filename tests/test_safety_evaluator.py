@@ -289,3 +289,37 @@ def test_change_check_skips_removals_and_empty_requests():
     request = "Remove the draining step because the casing is now drained automatically."
     assert not findings_of(evaluate_revision(SOURCE, draft(*removed), request), "change_not_applied")
     assert check_change_applied("", SOURCE, SOURCE) == []
+
+
+# --- v1.3 hierarchy of controls ---
+
+from src.safety_evaluator import check_control_downgrade  # noqa: E402
+
+
+def test_guard_replaced_by_gloves_is_a_control_downgrade():
+    [finding] = check_control_downgrade("Fit the fixed guard over the blade before starting the saw.",
+                                        "Wear cut-resistant gloves before starting the saw.", set())
+    assert (finding["type"], finding["severity"]) == ("control_downgraded", "high")
+    assert finding["evidence"] == "guard -> gloves"
+
+
+def test_ventilation_replaced_by_training_and_a_sign():
+    [finding] = check_control_downgrade("Switch on the local exhaust ventilation before decanting solvent.",
+                                        "Make sure staff are trained and a warning sign is posted before decanting solvent.", set())
+    assert finding["evidence"] == "local exhaust, ventilation -> sign, trained"
+
+
+def test_no_downgrade_when_the_control_stays_or_ppe_is_added_on_top():
+    keep = "Close the interlocked guard and wear safety glasses."
+    assert check_control_downgrade("Close the interlocked guard.", keep, set()) == []
+    assert check_control_downgrade("Wear gloves.", "Wear gloves and goggles.", set()) == []
+
+
+def test_requested_downgrade_is_review_and_it_runs_inside_the_evaluator():
+    [requested] = check_control_downgrade("Use the fume hood.", "Wear a respirator.", {"respirator"})
+    assert requested["severity"] == "review"
+    source = SOURCE.replace("2. Close the inlet valve and the outlet valve.", "2. Close the interlocked guard over the coupling.")
+    draft_steps = [STEPS[0], "Close the cover over the coupling and wear gloves.", STEPS[2]]
+    result = evaluate_revision(source, draft(*draft_steps))
+    [finding] = [f for f in result["findings"] if f["type"] == "control_downgraded"]
+    assert finding["draft_line"] == 4 and result["status"] == "fail"

@@ -191,7 +191,8 @@ def evaluate_sop(
 
 # Earlier versions are reproducible from git: each results/evaluator_validation_<version>*.json
 # records the commit it ran on.
-EVALUATOR_VERSION = "safe-sop-eval-1.2"
+# 1.3: required-element checklists (src/checklists) and hierarchy-of-controls downgrades.
+EVALUATOR_VERSION = "safe-sop-eval-1.3"
 
 MATCH_THRESHOLD = 0.8      # at or above: preserved / matched
 PARTIAL_THRESHOLD = 0.5    # between partial and match: altered, needs review
@@ -536,10 +537,50 @@ def meaning_findings(source, draft_text, label, change_words):
                          "detail": f"{label} says '{new}' where the source says '{old}'."
                                    + (" The change request mentions it; confirm." if requested else ""),
                          "source": source, "draft": draft_text})
-    return findings + check_quantifier(source, draft_text, change_words, flips) + check_actor(source, draft_text, change_words)
+    return (findings + check_quantifier(source, draft_text, change_words, flips)
+            + check_actor(source, draft_text, change_words) + check_control_downgrade(source, draft_text, change_words))
 
 
-LOCATED_TYPES = {"quantifier_weakened", "actor_changed"}  # v1.2 types that carry line numbers in the text path
+# v1.3 hierarchy of controls: elimination > substitution > engineering > administrative > PPE.
+# ponytail: phrase lists, not understanding; extend them from reviewers' false-alarm labels.
+STRONG_CONTROLS = re.compile(
+    r"\b(eliminat\w*|substitut\w*|guard(s|ed|ing)?|interlock\w*|enclos\w*|barriers?|fume hood|"
+    r"local exhaust|(exhaust |extraction |mechanical )?ventilation|extract(ion|or)|light curtains?|"
+    r"two-hand control|automatic(ally)? (shut ?-?off|stop|cut ?-?off)|emergency stop|e-?stop|"
+    r"isolat\w*|lock ?-?out|blank(s|ed)?|blind flange|remote(ly)? operat\w*|fixed (cover|shield))\b",
+    re.IGNORECASE)
+WEAK_CONTROLS = re.compile(
+    r"\b(train(ed|ing)?|signs?|signage|warning label|take care|be careful|careful(ly)?|caution|"
+    r"supervis\w*|permit|keep (away|clear)|stand clear|avoid|minimi[sz]e exposure|"
+    r"ppe|personal protective|gloves?|goggles|safety glasses|face shield|respirator|(dust )?masks?|"
+    r"aprons?|ear (plugs|defenders|protection)|hearing protection|hard hats?|safety boots|harness)\b",
+    re.IGNORECASE)
+
+
+def check_control_downgrade(source, draft_text, change_words):
+    """An elimination/substitution/engineering control in the source line is gone from the
+    matched draft line and an administrative instruction or PPE appears instead."""
+    strong_before = {m.lower() for m in _matches(STRONG_CONTROLS, source)}
+    if not strong_before or {m.lower() for m in _matches(STRONG_CONTROLS, draft_text)}:
+        return []
+    weak_added = {m.lower() for m in _matches(WEAK_CONTROLS, draft_text)} - {m.lower() for m in _matches(WEAK_CONTROLS, source)}
+    if not weak_added:
+        return []
+    requested = bool(set(" ".join(weak_added).split()) & change_words)
+    return [{
+        "type": "control_downgraded", "severity": "review" if requested else "high",
+        "detail": "An engineering or elimination control was replaced by an administrative instruction or PPE "
+                  "(lower in the hierarchy of controls)." + (" The change request mentions it; confirm." if requested else ""),
+        "source": source, "draft": draft_text,
+        "evidence": f"{', '.join(sorted(strong_before))} -> {', '.join(sorted(weak_added))}",
+    }]
+
+
+def _matches(pattern, text):
+    return [match.group(0) for match in pattern.finditer(text)]
+
+
+LOCATED_TYPES = {"quantifier_weakened", "actor_changed", "control_downgraded"}  # types that carry line numbers in the text path
 
 
 def line_number(lines, text):

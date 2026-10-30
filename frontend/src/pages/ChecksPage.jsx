@@ -10,6 +10,8 @@ const FRAMEWORK = [
   ["Weakened quantifiers and timing", "'all / every / each / always / before' replaced by 'some / most / a / after …' in a matched warning or step.", "Critical"],
   ["Changed actor", "The person who applies a lock or tag, or verifies, changed (e.g. 'each worker' -> 'the supervisor').", "High"],
   ["Change not applied", "The draft equals the original, or none of the change request's new values or terms appear in it.", "Critical"],
+  ["Required elements for the SOP type", "With an SOP type chosen at upload (e.g. lockout/tagout), each required element present in the original must still be in the draft.", "Critical"],
+  ["Hierarchy-of-controls downgrade", "An engineering or elimination control (guard, interlock, ventilation, isolation) replaced by training, signs or PPE.", "High"],
   ["Structured matching (prompt v3)", "Drafts that cite source ids (S1.., W1..) are matched by id, not by text. A warning declared removed is still critical; a step labelled unchanged is still compared with its source.", "Critical"],
   ["Uncertain cases", "Borderline matches, missing sections or undetectable structure give 'needs review', never a pass.", "Review"],
 ];
