@@ -9,7 +9,10 @@ async function request(path, options = {}) {
 
     try {
       const error = await response.json();
-      message = error.detail || message;
+      // FastAPI validation errors (422) arrive as a list of {loc, msg}.
+      message = Array.isArray(error.detail)
+        ? error.detail.map((item) => `${item.loc?.at(-1)}: ${item.msg}`).join("; ")
+        : error.detail || message;
     } catch {
       // Keep the default error message.
     }

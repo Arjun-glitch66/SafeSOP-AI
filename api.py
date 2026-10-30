@@ -37,6 +37,12 @@ VERSION_DIR = DATA_DIR / "versions"
 DB_PATH = DATA_DIR / "safesop.db"
 BACKUP_DIR = DATA_DIR / "backups"
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
+# Checked before the (billed) Gemini call. Text limits are enforced by FastAPI as 422s.
+MAX_PDF_PAGES = 50
+MAX_SOURCE_CHARS = 60_000
+MAX_DESCRIPTION_CHARS = 2000
+MAX_FEEDBACK_CHARS = 2000
+MAX_REVIEWER_CHARS = 100
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("safesop")
@@ -372,7 +378,7 @@ def download_original(document_id: str):
 @app.post("/api/documents/{document_id}/requests")
 def create_change_request(
     document_id: str,
-    description: str = Form(...),
+    description: str = Form(..., max_length=MAX_DESCRIPTION_CHARS),
     scope: str = Form("full"),
 ):
     description = description.strip()
@@ -437,12 +443,19 @@ def list_change_requests(document_id: str):
     return {"requests": [dict(row) for row in rows]}
 
 
-def extract_document_text(stored_path: str, scope: str, target_page: int | None):
+def extract_document_text(stored_path: str, scope: str, target_page: int | None,
+                          max_pages: int | None = None):
     """Extract text from the immutable uploaded PDF; never modify the source."""
     try:
         with pymupdf.open(stored_path) as pdf:
             if len(pdf) == 0:
                 raise HTTPException(status_code=422, detail="The PDF has no pages.")
+            if scope == "full" and max_pages and len(pdf) > max_pages:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"The PDF has {len(pdf)} pages; full-document revision supports up to "
+                           f"{max_pages}. Revise one page at a time instead.",
+                )
 
             if scope == "page":
                 if target_page is None:
@@ -487,7 +500,7 @@ def extract_document_text(stored_path: str, scope: str, target_page: int | None)
 @app.post("/api/documents/{document_id}/generate")
 def generate_revision(
     document_id: str,
-    description: str = Form(...),
+    description: str = Form(..., max_length=MAX_DESCRIPTION_CHARS),
     scope: str = Form("full"),
     target_page: int | None = Form(None),
     parent_version_id: str | None = Form(None),
@@ -531,8 +544,14 @@ def generate_revision(
         raise HTTPException(status_code=404, detail="Original PDF file is missing.")
 
     original_text, resolved_page = extract_document_text(
-        str(original_path), scope, target_page
+        str(original_path), scope, target_page, max_pages=MAX_PDF_PAGES
     )
+    if len(original_text) > MAX_SOURCE_CHARS:
+        raise HTTPException(
+            status_code=413,
+            detail=f"The source text is {len(original_text):,} characters; the limit is "
+                   f"{MAX_SOURCE_CHARS:,}. Revise one page at a time instead.",
+        )
 
     # Record the request before calling the provider so the requested change is auditable.
     request_id = str(uuid.uuid4())
@@ -889,8 +908,8 @@ def download_version(version_id: str, format: str = "txt"):
 def create_review(
     version_id: str,
     decision: str = Form(...),
-    reviewer: str = Form(""),
-    feedback: str = Form(""),
+    reviewer: str = Form("", max_length=MAX_REVIEWER_CHARS),
+    feedback: str = Form("", max_length=MAX_FEEDBACK_CHARS),
 ):
     """Record a human review decision. Only this endpoint changes a version's status."""
     decision = decision.strip().lower()

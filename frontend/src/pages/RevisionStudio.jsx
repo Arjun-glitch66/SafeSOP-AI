@@ -49,7 +49,7 @@ export default function RevisionStudio({ app }) {
           </>}
 
           <label className="field-label" htmlFor="change-request">Requested change <span className="required">*</span></label>
-          <textarea id="change-request" className="form-textarea" value={changeRequest} onChange={(event) => setChangeRequest(event.target.value)} placeholder="Describe what changed, why it changed, and which safety requirements must remain unchanged..." rows={6} />
+          <textarea id="change-request" className="form-textarea" maxLength={2000} value={changeRequest} onChange={(event) => setChangeRequest(event.target.value)} placeholder="Describe what changed, why it changed, and which safety requirements must remain unchanged..." rows={6} />
 
           {parentVersion && <div className="form-note"><History size={16} /><span>Regenerating from version {parentVersion.version_number}. The new draft is still generated from the <strong>original PDF</strong>; version {parentVersion.version_number} is only recorded as its parent. <button className="text-button" onClick={() => setParentVersion(null)}>Clear</button></span></div>}
           <div className="form-note"><ShieldCheck size={16} /><span>Safety warnings and critical prerequisites must be preserved or explicitly flagged for qualified review.</span></div>

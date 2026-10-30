@@ -203,3 +203,33 @@ def test_concurrent_generations_get_distinct_version_numbers(client, monkeypatch
     with ThreadPoolExecutor(workers) as pool:
         numbers = list(pool.map(run, range(workers)))
     assert sorted(numbers) == list(range(1, workers + 1))
+
+
+def test_text_inputs_have_length_limits(client):
+    doc_id = upload_two_page_pdf(client)
+    too_long = "x" * (api.MAX_DESCRIPTION_CHARS + 1)
+    assert generate(client, doc_id, description=too_long).status_code == 422
+    assert client.post(f"/api/documents/{doc_id}/requests", data={"description": too_long}).status_code == 422
+    assert client.prompts == []
+
+    url = f"/api/versions/{generate(client, doc_id, description='a').json()['version_id']}/reviews"
+    long_reviewer = {"decision": "rejected", "reviewer": "r" * (api.MAX_REVIEWER_CHARS + 1)}
+    long_feedback = {"decision": "rejected", "reviewer": "Arjun", "feedback": "f" * (api.MAX_FEEDBACK_CHARS + 1)}
+    assert client.post(url, data=long_reviewer).status_code == 422
+    assert client.post(url, data=long_feedback).status_code == 422
+    assert client.get(url).json()["reviews"] == []
+
+
+def test_oversized_source_is_refused_before_calling_gemini(client, monkeypatch):
+    doc_id = upload_two_page_pdf(client)
+
+    monkeypatch.setattr(api, "MAX_PDF_PAGES", 1)
+    response = generate(client, doc_id, description="x")
+    assert response.status_code == 413 and "2 pages" in response.json()["detail"]
+    # One page of a long PDF is still allowed.
+    assert generate(client, doc_id, description="x", scope="page", target_page=1).status_code == 200
+
+    monkeypatch.setattr(api, "MAX_SOURCE_CHARS", 10)
+    response = generate(client, doc_id, description="x", scope="page", target_page=1)
+    assert response.status_code == 413 and "characters" in response.json()["detail"]
+    assert len(client.prompts) == 1  # only the allowed page-scope call reached the model

@@ -64,9 +64,9 @@ export default function VersionHistory({ app }) {
         </div>
 
         <label className="field-label" htmlFor="reviewer">Reviewer name</label>
-        <input id="reviewer" className="form-input" value={reviewer} onChange={(event) => setReviewer(event.target.value)} placeholder="Qualified reviewer" />
+        <input id="reviewer" className="form-input" maxLength={100} value={reviewer} onChange={(event) => setReviewer(event.target.value)} placeholder="Qualified reviewer" />
         <label className="field-label" htmlFor="review-feedback">Review comments</label>
-        <textarea id="review-feedback" className="form-textarea" rows={3} value={reviewFeedback} onChange={(event) => setReviewFeedback(event.target.value)} placeholder="What was checked, and what must change?" />
+        <textarea id="review-feedback" className="form-textarea" maxLength={2000} rows={3} value={reviewFeedback} onChange={(event) => setReviewFeedback(event.target.value)} placeholder="What was checked, and what must change?" />
         <div className="action-row">
           <button className="btn btn-primary" disabled={submittingReview} onClick={() => handleReview("approved")}><CheckCircle2 size={16} /> Approve</button>
           <button className="btn btn-secondary" disabled={submittingReview} onClick={() => handleReview("needs_revision")}><RefreshCw size={16} /> Needs revision</button>
