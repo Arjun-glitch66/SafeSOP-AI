@@ -137,3 +137,17 @@ Each entry records: date, experiment ID, source documents, simulated changes, pr
   1. Human annotation of `results/EXP-002_annotation.csv` by two annotators (144 rows), then `evaluation/agreement.py`.
   2. **EXP-003 (proposed):** harder inputs to provoke real errors. Longer, multi-page public SOPs; change requests that touch several steps, conflict with a warning, or are ambiguous; page-scoped requests.
   3. Add a **change-application check** to the evaluator (do the change request's new values and terms appear in the draft?) as v1.2, with test cases written first.
+
+## Entry 8 — Phase 0: quick fixes (2026-10-30)
+
+Engineering only; no experiment was run and the evaluator (`safe-sop-eval-1.1`) is unchanged.
+
+- **Test hygiene:** the Gemini connection check moved from `test_gemini.py` to `scripts/check_gemini.py`; `pytest.ini` sets `testpaths = tests`, so a bare `pytest` can no longer make a billed call.
+- **Version-number race:** two concurrent generations could both read the same `MAX(version_number) + 1` and the second insert failed *after* Gemini had been paid. A test with 8 threads reproduced it (UNIQUE constraint error → HTTP 500). Numbering and insert now run inside `BEGIN IMMEDIATE`; the existing `UNIQUE(document_id, version_number)` stays as the backstop, with a retry.
+- **Limits before the model call:** 50 pages (full scope), 60k extracted characters, 2,000-character change requests and review comments, 100-character reviewer names.
+- **Review states:** approved versions are locked (409 on any later review). Whether `rejected` should also be final is open (TODO_HUMAN.md).
+- **Change requests:** `target_page` is now its own column (added by the migration; old rows keep `NULL`), and `/generate` accepts `request_id` to draft from a saved request.
+- **Dead code:** removed the unused `data/versions/*.md` writes, Tailwind (only its CSS reset was used; the needed parts now live in `index.css`), `icons.svg` and `getChangeRequests`. `src/document_parser.py` and the old evaluator functions were **kept** because `legacy/` imports them (TODO_HUMAN.md).
+- **Accessibility:** inert closed mobile nav, `+`/`−` diff markers with screen-reader text, ≥ 3:1 control borders, one `h1` and a `document.title` per view, full ARIA tab pattern on the version view, error boundary per view, toast timer fix, backend health polled every 15 s.
+- **Config:** CORS origins come from `ALLOWED_ORIGINS`.
+- **Verification:** 47 pytest tests pass (38 → 47); frontend build passes; a headless-browser check at 1440 px and 375 px showed the layout unchanged after removing Tailwind, and `inert`/`aria-expanded` switching correctly on the mobile nav.

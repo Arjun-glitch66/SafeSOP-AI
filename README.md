@@ -9,7 +9,21 @@ Generative AI for automated SOP and work-instruction revision. Upload an existin
 1. **Upload.** The original PDF is stored unchanged (SHA-256 recorded) and is never overwritten.
 2. **Generate.** The change request and the text of the original PDF (full document or one page) are sent to Gemini. Every generation, including a regeneration, uses the **original PDF** as its source. A regeneration only records its parent version for lineage.
 3. **Evaluate.** Each draft is checked automatically for missing or altered warnings, unsupported instructions or values, step-order violations, and omitted, duplicated or conflicting steps. See [research_logbook/EVALUATION_FRAMEWORK.md](research_logbook/EVALUATION_FRAMEWORK.md).
-4. **Review.** A reviewer approves the version, rejects it, or marks it as needing revision. Each decision is stored with a timestamp.
+4. **Review.** A reviewer approves the version, rejects it, or marks it as needing revision. Each decision is stored with a timestamp. An **approved version is locked**: any later review is refused (HTTP 409); changes go into a new version.
+
+A change request can also be saved first and generated later: `POST /api/documents/{id}/requests` (with `target_page` for page scope), then `POST /api/documents/{id}/generate` with `request_id`. The draft is linked to that saved request.
+
+### Limits
+
+Checked before Gemini is called, so an oversized request never costs a model call:
+
+| Input | Limit | Response |
+|---|---|---|
+| PDF upload | 20 MB | 413 |
+| Pages, full-document scope | 50 (use page scope for longer PDFs) | 413 |
+| Extracted source text | 60,000 characters | 413 |
+| Change request | 2,000 characters | 422 |
+| Review comments / reviewer name | 2,000 / 100 characters | 422 |
 
 ## Architecture
 
@@ -42,11 +56,13 @@ GEMINI_API_KEY=your-key-here
 GEMINI_MODEL=gemini-3.5-flash-lite
 # optional, default 0.2
 GEMINI_TEMPERATURE=0.2
+# optional, comma-separated origins allowed to call the API (default: the Vite dev server)
+ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 ```
 
-The frontend calls `http://127.0.0.1:8000` by default. To use another backend, set `VITE_API_BASE` in `frontend/.env.local`.
+The frontend calls `http://127.0.0.1:8000` by default (the backend health check is retried every 15 s, so start order does not matter). To use another backend, set `VITE_API_BASE` in `frontend/.env.local`.
 
-Check the connection with `python test_gemini.py`. It should print `SUCCESS: SafeSOP AI connected`.
+Check the connection with `python scripts/check_gemini.py` (one real, billed API call). It should print `SUCCESS: SafeSOP AI connected`. It is a manual script, not a test: `pytest.ini` limits pytest to `tests/`, so a bare `pytest` never calls Gemini.
 
 ## Run
 
@@ -67,7 +83,7 @@ On first start against an older database, the API backs up `data/safesop.db` to 
 ## Test and evaluate
 
 ```
-.venv\Scripts\python -m pytest -q tests                                     # 38 tests, Gemini stubbed
+.venv\Scripts\python -m pytest -q                                           # 47 tests, Gemini stubbed
 .venv\Scripts\python evaluation\validate_evaluator.py                      # EXP-001, no API key needed
 .venv\Scripts\python evaluation\make_charts.py                             # figures in results\charts
 .venv\Scripts\python evaluation\run_generation_experiment.py --repeats 3   # EXP-002, needs Gemini key
@@ -84,7 +100,9 @@ GitHub Actions (`.github/workflows/ci.yml`) runs the tests, EXP-001 and the fron
 | `src/sop_generator.py` | Gemini prompt (`PROMPT_VERSION`) and generation |
 | `src/safety_evaluator.py` | SAFE-SOP automated evaluator (`evaluate_revision`) |
 | `src/document_parser.py` | PDF helpers used only by the legacy prototype (the API extracts text in `api.py`) |
-| `frontend/` | React + Vite interface: `src/App.jsx` (state), `src/pages/`, `src/components/` |
+| `frontend/` | React + Vite interface: `src/App.jsx` (state), `src/pages/`, `src/components/`. See [frontend/README.md](frontend/README.md) |
+| `scripts/check_gemini.py` | Manual Gemini connection check (billed call, not a test) |
+| `TODO_HUMAN.md` | Open decisions that need a person (product, licence, cost, labelling) |
 | `evaluation/` | Test set and experiment scripts |
 | `results/` | Experiment summaries (raw model outputs in `results/raw/` are gitignored) |
 | `research_logbook/` | Evaluation framework and research logbook |
