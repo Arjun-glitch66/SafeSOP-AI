@@ -171,13 +171,14 @@ export default function App() {
   // The backend supports full-document and page-scoped requests only.
   const requestScope = scope === "Full document" ? "full" : "page";
 
-  async function handleGenerate() {
-    if (!requestIsReady()) return;
+  // requestId: generate from that saved change request instead of the form fields.
+  async function handleGenerate(requestId = null) {
+    if (!requestId && !requestIsReady()) return;
     setGenerating(true);
     setGenerated(null);
     try {
       // The backend always reads the immutable original PDF, never a previous draft.
-      const result = await generateRevision(file.id, changeRequest.trim(), requestScope, Number(targetPage), parentVersion?.id);
+      const result = await generateRevision(file.id, changeRequest.trim(), requestScope, Number(targetPage), parentVersion?.id, requestId);
       setGenerated(result);
       setParentVersion(null);
       currentVersionId.current = result.version_id;
@@ -197,12 +198,9 @@ export default function App() {
 
   async function handleSaveRequest() {
     if (!requestIsReady()) return;
-    const scopedDescription = scope === "Selected page"
-      ? `[Target page: ${targetPage}]\n${changeRequest.trim()}`
-      : changeRequest.trim();
     setSavingRequest(true);
     try {
-      const saved = await createChangeRequest(file.id, scopedDescription, requestScope);
+      const saved = await createChangeRequest(file.id, changeRequest.trim(), requestScope, Number(targetPage));
       setSavedRequests((current) => [saved, ...current]);
       setShowRequest(true);
       showNotice("Change request saved to the backend. AI generation has not run yet.");

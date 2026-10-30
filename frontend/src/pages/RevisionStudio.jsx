@@ -53,7 +53,7 @@ export default function RevisionStudio({ app }) {
 
           {parentVersion && <div className="form-note"><History size={16} /><span>Regenerating from version {parentVersion.version_number}. The new draft is still generated from the <strong>original PDF</strong>; version {parentVersion.version_number} is only recorded as its parent. <button className="text-button" onClick={() => setParentVersion(null)}>Clear</button></span></div>}
           <div className="form-note"><ShieldCheck size={16} /><span>Safety warnings and critical prerequisites must be preserved or explicitly flagged for qualified review.</span></div>
-          <button className="btn btn-primary btn-full" disabled={generating || !backendOnline} onClick={handleGenerate}><Sparkles size={16} /> {generating ? "Generating draft with Gemini..." : "Generate revised draft"}</button>
+          <button className="btn btn-primary btn-full" disabled={generating || !backendOnline} onClick={() => handleGenerate()}><Sparkles size={16} /> {generating ? "Generating draft with Gemini..." : "Generate revised draft"}</button>
           <button className="btn btn-secondary btn-full btn-stacked" disabled={savingRequest || generating || !backendOnline} onClick={handleSaveRequest}><Check size={16} /> {savingRequest ? "Saving request..." : "Save request only (no generation)"}</button>
         </section>
 
@@ -81,7 +81,7 @@ export default function RevisionStudio({ app }) {
         <div className="progress-indeterminate"><span /></div>
       </section>}
 
-      {showRequest && !generated && !generating && <section className="panel request-summary"><div className="panel-heading"><div><h3>Saved request preview</h3><p>Saved change request. AI generation has not run yet.</p></div><Badge tone="blue">Prepared</Badge></div><p><strong>Scope:</strong> {scope}</p><p><strong>Change:</strong> {changeRequest}</p>{savedRequests[0] && <p><strong>Request ID:</strong> {savedRequests[0].id}</p>}<button className="btn btn-primary" onClick={handleGenerate}><Sparkles size={16} /> Generate draft from this request</button></section>}
+      {showRequest && savedRequests[0] && !generated && !generating && <section className="panel request-summary"><div className="panel-heading"><div><h3>Saved request preview</h3><p>Saved change request. AI generation has not run yet.</p></div><Badge tone="blue">Prepared</Badge></div><p><strong>Scope:</strong> {savedRequests[0].scope === "page" ? `Page ${savedRequests[0].target_page}` : "Full document"}</p><p><strong>Change:</strong> {savedRequests[0].description}</p><p><strong>Request ID:</strong> {savedRequests[0].id}</p><button className="btn btn-primary" disabled={!backendOnline} onClick={() => handleGenerate(savedRequests[0].id)}><Sparkles size={16} /> Generate draft from this request</button></section>}
 
       {generated && <section className="panel request-summary">
         <div className="panel-heading"><div><h3>Generated draft · Version {generated.version_number}</h3><p>{generated.model} · prompt {generated.prompt_version} · temperature {generated.temperature ?? "default"} · {generated.input_tokens ?? "?"} input / {generated.output_tokens ?? "?"} output tokens · {new Date(generated.created_at).toLocaleString()}</p></div><Badge tone="amber" dot>Draft · Not approved</Badge></div>

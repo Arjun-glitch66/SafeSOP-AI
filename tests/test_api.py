@@ -198,7 +198,7 @@ def test_concurrent_generations_get_distinct_version_numbers(client, monkeypatch
     monkeypatch.setattr(api, "generate_sop", slow_generate_sop)
 
     def run(index):
-        return api.generate_revision(doc_id, f"change {index}", "full", None, None)["version_number"]
+        return api.generate_revision(doc_id, f"change {index}", "full", None, None, None)["version_number"]
 
     with ThreadPoolExecutor(workers) as pool:
         numbers = list(pool.map(run, range(workers)))
@@ -249,3 +249,54 @@ def test_approved_version_is_locked(client):
 
     assert client.get(f"/api/versions/{v1['version_id']}").json()["status"] == "approved"
     assert [r["decision"] for r in client.get(url).json()["reviews"]] == ["approved", "needs_revision"]
+
+
+def save_request(client, doc_id, **data):
+    return client.post(f"/api/documents/{doc_id}/requests", data=data)
+
+
+def test_saved_request_stores_target_page_in_its_own_column(client):
+    doc_id = upload_two_page_pdf(client)
+    saved = save_request(client, doc_id, description="add gloves", scope="page", target_page=2).json()
+    assert (saved["description"], saved["target_page"]) == ("add gloves", 2)
+
+    full = save_request(client, doc_id, description="x", scope="full", target_page=2).json()
+    assert full["target_page"] is None  # a page number means nothing for full scope
+
+    assert save_request(client, doc_id, description="x", scope="page").status_code == 400
+    assert save_request(client, doc_id, description="x", scope="page", target_page=3).status_code == 400
+
+    stored = {r["id"]: r for r in client.get(f"/api/documents/{doc_id}/requests").json()["requests"]}
+    assert stored[saved["id"]]["target_page"] == 2 and "[Target page" not in stored[saved["id"]]["description"]
+
+
+def test_generate_from_saved_request_uses_and_links_it(client):
+    doc_id = upload_two_page_pdf(client)
+    saved = save_request(client, doc_id, description="add gloves", scope="page", target_page=2).json()
+
+    # Submitted description/scope are ignored in favour of the saved request.
+    version = generate(client, doc_id, request_id=saved["id"], description="something else").json()
+    assert version["request_id"] == saved["id"] and version["target_page"] == 2
+    assert "add gloves" in version["content"] and "(page)" in version["content"]
+    assert "PAGE TWO" in client.prompts[0] and "PAGE ONE" not in client.prompts[0]
+    assert len(client.get(f"/api/documents/{doc_id}/requests").json()["requests"]) == 1  # no duplicate
+
+    listed = client.get(f"/api/documents/{doc_id}/versions").json()["versions"][0]
+    assert (listed["change_request"], listed["scope"], listed["target_page"]) == ("add gloves", "page", 2)
+
+
+def test_generate_rejects_unknown_or_foreign_request_id(client):
+    doc_a = upload_two_page_pdf(client)
+    doc_b = upload_two_page_pdf(client)
+    foreign = save_request(client, doc_b, description="x").json()["id"]
+    assert generate(client, doc_a, request_id=foreign).status_code == 400
+    assert generate(client, doc_a, request_id="nope").status_code == 400
+    assert generate(client, doc_a).status_code == 400  # neither description nor request_id
+    assert client.prompts == []
+
+
+def test_direct_generation_records_target_page_on_its_request(client):
+    doc_id = upload_two_page_pdf(client)
+    generate(client, doc_id, description="add gloves", scope="page", target_page=2)
+    request = client.get(f"/api/documents/{doc_id}/requests").json()["requests"][0]
+    assert (request["scope"], request["target_page"]) == ("page", 2)

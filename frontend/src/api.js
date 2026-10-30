@@ -53,11 +53,13 @@ export async function getDocumentVersions(documentId) {
 export async function createChangeRequest(
   documentId,
   description,
-  scope = "full"
+  scope = "full",
+  targetPage = null
 ) {
   const formData = new FormData();
   formData.append("description", description);
   formData.append("scope", scope);
+  if (scope === "page") formData.append("target_page", targetPage);
 
   return request(
     `/api/documents/${encodeURIComponent(documentId)}/requests`,
@@ -68,11 +70,16 @@ export async function createChangeRequest(
   );
 }
 
-export async function generateRevision(documentId, description, scope = "full", targetPage = null, parentVersionId = null) {
+// With requestId, the backend takes description, scope and page from that saved request.
+export async function generateRevision(documentId, description, scope = "full", targetPage = null, parentVersionId = null, requestId = null) {
   const formData = new FormData();
-  formData.append("description", description);
-  formData.append("scope", scope);
-  if (scope === "page") formData.append("target_page", targetPage);
+  if (requestId) {
+    formData.append("request_id", requestId);
+  } else {
+    formData.append("description", description);
+    formData.append("scope", scope);
+    if (scope === "page") formData.append("target_page", targetPage);
+  }
   if (parentVersionId) formData.append("parent_version_id", parentVersionId);
 
   return request(

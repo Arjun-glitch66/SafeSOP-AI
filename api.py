@@ -104,6 +104,10 @@ DOCUMENT_COLUMNS = {
     "page_count": "INTEGER",
 }
 
+CHANGE_REQUEST_COLUMNS = {
+    "target_page": "INTEGER",
+}
+
 # Version states: draft -> needs_revision | approved | rejected. Approved versions are
 # locked; any further review is refused with 409. Changes go into a new version.
 REVIEW_DECISIONS = {"approved", "rejected", "needs_revision"}
@@ -178,7 +182,8 @@ def init_db():
         )
 
         missing = []
-        for table, wanted in (("documents", DOCUMENT_COLUMNS), ("versions", VERSION_COLUMNS)):
+        for table, wanted in (("documents", DOCUMENT_COLUMNS), ("versions", VERSION_COLUMNS),
+                              ("change_requests", CHANGE_REQUEST_COLUMNS)):
             existing = {row["name"] for row in connection.execute(f"PRAGMA table_info({table})")}
             missing += [(table, name, sql) for name, sql in wanted.items() if name not in existing]
 
@@ -384,6 +389,7 @@ def create_change_request(
     document_id: str,
     description: str = Form(..., max_length=MAX_DESCRIPTION_CHARS),
     scope: str = Form("full"),
+    target_page: int | None = Form(None),
 ):
     description = description.strip()
     scope = scope.strip().lower()
@@ -395,24 +401,33 @@ def create_change_request(
             status_code=400,
             detail="Scope must be 'full' or 'page'.",
         )
+    if scope == "full":
+        target_page = None
+    elif target_page is None or target_page < 1:
+        raise HTTPException(status_code=400, detail="For page scope, provide target_page (starting at 1).")
 
     with connect_db() as connection:
-        exists = connection.execute(
-            "SELECT id FROM documents WHERE id = ?",
+        document = connection.execute(
+            "SELECT page_count FROM documents WHERE id = ?",
             (document_id,),
         ).fetchone()
-        if not exists:
+        if not document:
             raise HTTPException(status_code=404, detail="Document not found.")
+        if target_page and document["page_count"] and target_page > document["page_count"]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"target_page must be between 1 and {document['page_count']}.",
+            )
 
         request_id = str(uuid.uuid4())
         created = now()
         connection.execute(
             """
             INSERT INTO change_requests
-                (id, document_id, description, scope, created_at)
-            VALUES (?, ?, ?, ?, ?)
+                (id, document_id, description, scope, target_page, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (request_id, document_id, description, scope, created),
+            (request_id, document_id, description, scope, target_page, created),
         )
 
     return {
@@ -420,6 +435,7 @@ def create_change_request(
         "document_id": document_id,
         "description": description,
         "scope": scope,
+        "target_page": target_page,
         "created_at": created,
         "status": "saved",
         "message": "Change request saved. Submit it to the generation endpoint to create a draft.",
@@ -504,24 +520,19 @@ def extract_document_text(stored_path: str, scope: str, target_page: int | None,
 @app.post("/api/documents/{document_id}/generate")
 def generate_revision(
     document_id: str,
-    description: str = Form(..., max_length=MAX_DESCRIPTION_CHARS),
+    description: str | None = Form(None, max_length=MAX_DESCRIPTION_CHARS),
     scope: str = Form("full"),
     target_page: int | None = Form(None),
     parent_version_id: str | None = Form(None),
+    request_id: str | None = Form(None),
 ):
     """
     Generate and save an AI draft. This is not safety approval.
     The original PDF remains unchanged and is always the generation source;
     parent_version_id only records which earlier draft this one revises.
+    With request_id, the saved change request supplies the description, scope and
+    target page (submitted values for those are ignored) and is linked to the draft.
     """
-    description = description.strip()
-    scope = scope.strip().lower()
-
-    if not description:
-        raise HTTPException(status_code=400, detail="Describe the process change.")
-    if scope not in {"full", "page"}:
-        raise HTTPException(status_code=400, detail="Scope must be 'full' or 'page'.")
-
     with connect_db() as connection:
         document = connection.execute(
             "SELECT * FROM documents WHERE id = ?",
@@ -535,6 +546,13 @@ def generate_revision(
                 (parent_version_id, document_id),
             ).fetchone()
 
+        saved_request = None
+        if request_id:
+            saved_request = connection.execute(
+                "SELECT * FROM change_requests WHERE id = ? AND document_id = ?",
+                (request_id, document_id),
+            ).fetchone()
+
     if not document:
         raise HTTPException(status_code=404, detail="Document not found.")
     if parent_version_id and not parent:
@@ -542,6 +560,22 @@ def generate_revision(
             status_code=400,
             detail="parent_version_id must be a version of this document.",
         )
+    if request_id and not saved_request:
+        raise HTTPException(
+            status_code=400,
+            detail="request_id must be a saved change request for this document.",
+        )
+    if saved_request:
+        description, scope, target_page = (
+            saved_request["description"], saved_request["scope"], saved_request["target_page"]
+        )
+
+    description = (description or "").strip()
+    scope = scope.strip().lower()
+    if not description:
+        raise HTTPException(status_code=400, detail="Describe the process change.")
+    if scope not in {"full", "page"}:
+        raise HTTPException(status_code=400, detail="Scope must be 'full' or 'page'.")
 
     original_path = Path(document["stored_path"])
     if not original_path.is_file():
@@ -558,17 +592,17 @@ def generate_revision(
         )
 
     # Record the request before calling the provider so the requested change is auditable.
-    request_id = str(uuid.uuid4())
-    created = now()
-    with connect_db() as connection:
-        connection.execute(
-            """
-            INSERT INTO change_requests
-                (id, document_id, description, scope, created_at)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (request_id, document_id, description, scope, created),
-        )
+    if not saved_request:
+        request_id = str(uuid.uuid4())
+        with connect_db() as connection:
+            connection.execute(
+                """
+                INSERT INTO change_requests
+                    (id, document_id, description, scope, target_page, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (request_id, document_id, description, scope, resolved_page, now()),
+            )
 
     try:
         result = generate_sop(

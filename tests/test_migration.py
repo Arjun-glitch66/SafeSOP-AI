@@ -35,10 +35,12 @@ def test_old_database_is_backed_up_and_upgraded_without_data_loss(temp_db):
     with api.connect_db() as connection:
         row = dict(connection.execute("SELECT * FROM versions WHERE id = 'ver1'").fetchone())
         tables = {r["name"] for r in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        request = dict(connection.execute("SELECT * FROM change_requests WHERE id = 'req1'").fetchone())
 
     assert row["content"] == "old draft text"
     assert row["source_document_id"] == "doc1"
     assert set(api.VERSION_COLUMNS) <= set(row)
+    assert request["description"] == "add gloves" and request["target_page"] is None
     assert {"evaluations", "review_history"} <= tables
 
     backups = list((temp_db / "backups").glob("*.db"))
