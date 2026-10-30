@@ -1,17 +1,19 @@
 """Generating, listing, comparing, evaluating and downloading versions."""
+import asyncio
 import difflib
 import json
 import uuid
 
 from fastapi import APIRouter, Depends, Form, HTTPException
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from app import config
 from app.auth import require_role
 from app.schemas import FINDING_VERDICTS
 from app.db import connect_db, now
 from app.services.evaluation import load_version_source, run_and_save_evaluation
-from app.services.generation import generate_version
+from app.services import jobs
+from app.services.generation import prepare_generation
 from app.services.pdf import render_draft_pdf
 from src.safety_evaluator import extract_draft_section, extract_warnings, text_lines
 
@@ -29,14 +31,50 @@ def generate_revision(
     user=Depends(require_role("author")),
 ):
     """
-    Generate and save an AI draft. This is not safety approval.
+    Start generating an AI draft. Input problems are answered at once (4xx); otherwise the
+    answer is 202 with a job id, and the slow model call runs in the background. Follow it
+    with GET /api/jobs/{job_id} or the event stream at /api/jobs/{job_id}/events.
     The original PDF remains unchanged and is always the generation source;
     parent_version_id only records which earlier draft this one revises.
     With request_id, the saved change request supplies the description, scope and
     target page (submitted values for those are ignored) and is linked to the draft.
     """
-    return generate_version(document_id, description, scope, target_page, parent_version_id, request_id,
-                            created_by=user["username"])
+    prepared = prepare_generation(document_id, description, scope, target_page, parent_version_id, request_id,
+                                  created_by=user["username"])
+    job = jobs.submit(prepared)
+    return JSONResponse(status_code=202, content={
+        "job_id": job["id"], "status": job["status"], "stage_text": job["stage_text"],
+        "status_url": f"/api/jobs/{job['id']}", "events_url": f"/api/jobs/{job['id']}/events",
+    })
+
+
+@router.get("/api/jobs/{job_id}")
+def get_job(job_id: str):
+    return jobs.get_job(job_id)
+
+
+@router.get("/api/jobs/{job_id}/events")
+async def job_events(job_id: str):
+    """Server-sent events: one `progress` event per change, then `succeeded` or `failed`."""
+    jobs.get_job(job_id)  # 404 before the stream starts
+
+    async def stream():
+        last = None
+        for tick in range(int(config.JOB_STREAM_SECONDS / 0.5)):
+            job = await asyncio.to_thread(jobs.get_job, job_id)
+            state = (job["status"], job["stage"])
+            if state != last:
+                last = state
+                kind = job["status"] if job["status"] in jobs.TERMINAL else "progress"
+                yield f"event: {kind}\ndata: {json.dumps(job)}\n\n"
+                if kind != "progress":
+                    return
+            elif tick % 30 == 0:
+                yield ": keep-alive\n\n"
+            await asyncio.sleep(0.5)
+
+    return StreamingResponse(stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @router.post("/api/versions/{version_id}/evaluate")

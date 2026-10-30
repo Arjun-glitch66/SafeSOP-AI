@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { ArrowDownToLine, BookOpen, Check, CheckCircle2, FileClock, FileText, Files, History, ShieldCheck, Sparkles, Workflow, X } from "lucide-react";
-import { createChangeRequest, downloadOriginal, generateRevision, getDocument, getDocumentVersions } from "../api.js";
+import { createChangeRequest, downloadOriginal, followJob, generateRevision, getDocument, getDocumentVersions } from "../api.js";
 import { Badge, EmptyState } from "../components/ui.jsx";
 import { evaluationLabel, evaluationTone, statusLabel, statusTone } from "../components/labels.js";
 import { useAuth, useBackend, useNotice, useResource, useTitle } from "../state.jsx";
@@ -65,6 +65,7 @@ function RequestForm({ doc, onGenerated }) {
   const [saved, setSaved] = useState(null);
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [stage, setStage] = useState("");
   const controller = useRef(null);
 
   function ready() {
@@ -81,17 +82,23 @@ function RequestForm({ doc, onGenerated }) {
     if (!requestId && !ready()) return;
     controller.current = new AbortController();
     setGenerating(true);
+    setStage("Sending the request");
     try {
       // The backend always reads the immutable original PDF, never a previous draft.
-      const result = await generateRevision(doc.id, {
+      // It answers at once with a job; the model call runs in the background.
+      const accepted = await generateRevision(doc.id, {
         description: changeRequest.trim(), scope, targetPage: Number(targetPage),
-        parentVersionId: parent?.id, requestId, signal: controller.current.signal,
+        parentVersionId: parent?.id, requestId,
       });
+      setStage(accepted.stage_text);
+      const job = await followJob(accepted.job_id, (progress) => setStage(progress.stage_text), controller.current.signal);
+      if (job.status !== "succeeded") throw new Error(job.detail || "Generation failed.");
+      const result = job.result;
       show(`Draft saved as version ${result.version_number}. Automated check: ${evaluationLabel[result.safety_evaluation?.status] || "not run"}.`);
       navigate(`/versions/${result.version_id}`);
     } catch (error) {
       if (error.name === "AbortError") {
-        show("Stopped waiting. If the server had already sent the request to Gemini, the draft may still appear in the version list shortly.", "error");
+        show("Stopped watching. The draft is still being generated and will appear in the revision register when it is ready.");
         window.setTimeout(onGenerated, 15000);
       } else {
         show(`Generation failed: ${error.message}`, "error");
@@ -141,9 +148,9 @@ function RequestForm({ doc, onGenerated }) {
 
       {generating ? (
         <div className="generation-progress" aria-live="polite">
-          <div><strong>Generating draft…</strong><p>Gemini usually takes 5–30 seconds. The draft is checked automatically as soon as it arrives.</p></div>
+          <div><strong>{stage}…</strong><p>Usually 5–30 seconds. The draft is checked automatically as soon as it arrives.</p></div>
           <div className="progress-indeterminate"><span /></div>
-          <button className="btn btn-secondary" onClick={() => controller.current?.abort()}><X size={16} /> Cancel</button>
+          <button className="btn btn-secondary" onClick={() => controller.current?.abort()}><X size={16} /> Stop watching</button>
         </div>
       ) : <>
         <button className="btn btn-primary btn-full" disabled={!online} onClick={() => generate()}><Sparkles size={16} /> Generate revised draft</button>

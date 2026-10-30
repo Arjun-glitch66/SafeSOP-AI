@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app import config
 from app.auth import current_user, seed_admin
 from app.db import init_db
+from app.services import jobs
 from app.routers import audit, auth, documents, health, requests, reviews, versions
 
 logging.basicConfig(level=logging.INFO)
@@ -18,8 +19,10 @@ logger = logging.getLogger("safesop")
 async def lifespan(_app):
     init_db()
     seed_admin()
+    jobs.fail_interrupted_jobs()
     logger.info("SafeSOP API started. Database: %s", config.DB_PATH)
     yield
+    jobs.shutdown()
 
 
 app = FastAPI(

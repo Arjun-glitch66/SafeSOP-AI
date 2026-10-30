@@ -20,7 +20,17 @@ logger = logging.getLogger("safesop")
 
 def generate_version(document_id, description, scope, target_page, parent_version_id, request_id, created_by):
     """
-    Generate and save an AI draft. This is not safety approval.
+    Generate and save an AI draft in the calling thread. This is not safety approval.
+    The API runs the same two steps with run_generation() on a background worker.
+    """
+    return run_generation(prepare_generation(document_id, description, scope, target_page, parent_version_id,
+                                             request_id, created_by))
+
+
+def prepare_generation(document_id, description, scope, target_page, parent_version_id, request_id, created_by):
+    """
+    Everything that can fail fast, before the (slow, billed) model call: input checks, limits,
+    reading the original PDF and recording the change request. Raises HTTPException 4xx.
     The original PDF remains unchanged and is always the generation source;
     parent_version_id only records which earlier draft this one revises.
     With request_id, the saved change request supplies the description, scope and
@@ -107,6 +117,22 @@ def generate_version(document_id, description, scope, target_page, parent_versio
                 (request_id, document_id, description, scope, resolved_page, now()),
             )
 
+    return {
+        "document_id": document_id, "filename": document["filename"], "description": description, "scope": scope,
+        "original_text": original_text, "resolved_page": resolved_page, "parent_version_id": parent_version_id or None,
+        "request_id": request_id, "review_feedback": review_feedback, "created_by": created_by,
+    }
+
+
+def run_generation(prepared, progress=lambda stage: None):
+    """The model call, saving the version and the automated checks. `progress(stage)` reports
+    'generating', 'saving' and 'evaluating'. Raises HTTPException (502 model, 500 save)."""
+    document_id, description, scope = prepared["document_id"], prepared["description"], prepared["scope"]
+    original_text, resolved_page = prepared["original_text"], prepared["resolved_page"]
+    parent_version_id, request_id = prepared["parent_version_id"], prepared["request_id"]
+    review_feedback, created_by = prepared["review_feedback"], prepared["created_by"]
+
+    progress("generating")
     try:
         result = generate_sop(
             original_text=original_text,
@@ -124,6 +150,7 @@ def generate_version(document_id, description, scope, target_page, parent_versio
         )
         raise HTTPException(status_code=502, detail=f"AI generation failed: {reason}") from exc
 
+    progress("saving")
     generated_text = result["text"]
     version_id = str(uuid.uuid4())
     created_version = now()
@@ -168,6 +195,7 @@ def generate_version(document_id, description, scope, target_page, parent_versio
                    "Check the backend terminal.",
         ) from exc
 
+    progress("evaluating")
     evaluation = run_and_save_evaluation(version_id, original_text, generated_text, description,
                                          result.get("structured"), resolved_page)
 
@@ -177,7 +205,7 @@ def generate_version(document_id, description, scope, target_page, parent_versio
         "document_id": document_id,
         "request_id": request_id,
         "version_number": next_version,
-        "filename": document["filename"],
+        "filename": prepared["filename"],
         "content": generated_text,
         "status": "draft",
         "ai_provider": "Google Gemini",

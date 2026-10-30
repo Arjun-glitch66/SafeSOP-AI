@@ -99,6 +99,31 @@ export function generateRevision(documentId, { description, scope = "full", targ
   });
 }
 
+// Follow a background job's server-sent events until it succeeds or fails. EventSource cannot
+// send the Authorization header, so the stream is read with fetch. Resolves with the final job.
+export async function followJob(jobId, onProgress, signal) {
+  const response = await send(`/api/jobs/${id(jobId)}/events`, { signal });
+  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buffer = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += value;
+    let end;
+    while ((end = buffer.indexOf("\n\n")) >= 0) {
+      const block = buffer.slice(0, end);
+      buffer = buffer.slice(end + 2);
+      const event = /^event: (.*)$/m.exec(block)?.[1];
+      const data = /^data: (.*)$/m.exec(block)?.[1];
+      if (!event || !data) continue;  // keep-alive comment
+      const job = JSON.parse(data);
+      if (event === "progress") onProgress(job);
+      else return job;
+    }
+  }
+  return request(`/api/jobs/${id(jobId)}`);  // stream ended early: ask once more
+}
+
 // ---- versions ----
 export const getVersion = (versionId) => request(`/api/versions/${id(versionId)}`);
 export const getVersionContent = async (versionId) => (await request(`/api/versions/${id(versionId)}/content`)).content;

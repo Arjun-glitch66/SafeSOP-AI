@@ -1,6 +1,8 @@
 """End-to-end API tests with Gemini stubbed and a temporary database."""
 import hashlib
+import json
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pymupdf
@@ -63,8 +65,33 @@ def upload_two_page_pdf(client):
     return response.json()["id"]
 
 
-def generate(client, doc_id, **data):
-    return client.post(f"/api/documents/{doc_id}/generate", data={"scope": "full", **data})
+class JobOutcome:
+    """The finished job, shaped like the synchronous response /generate used to give."""
+
+    def __init__(self, job):
+        self.job = job
+        self.status_code = job["http_status"]
+
+    def json(self):
+        return self.job["result"] if self.status_code == 200 else {"detail": self.job["detail"]}
+
+
+def wait_for_job(client, job_id, headers=None, timeout=10):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        job = client.get(f"/api/jobs/{job_id}", headers=headers).json()
+        if job["status"] in ("succeeded", "failed"):
+            return job
+        time.sleep(0.02)
+    raise AssertionError(f"job {job_id} did not finish: {job}")
+
+
+def generate(client, doc_id, headers=None, **data):
+    """POST /generate; input errors come back at once, otherwise follow the job to its end."""
+    response = client.post(f"/api/documents/{doc_id}/generate", data={"scope": "full", **data}, headers=headers)
+    if response.status_code != 202:
+        return response
+    return JobOutcome(wait_for_job(client, response.json()["job_id"], headers))
 
 
 def original_hash(doc_id):
@@ -221,8 +248,7 @@ def test_concurrent_generations_get_distinct_version_numbers(client, monkeypatch
     monkeypatch.setattr(api, "generate_sop", slow_generate_sop)
 
     def run(index):
-        author = {"id": "u1", "username": "alice", "role": "author"}
-        return api.generate_revision(doc_id, f"change {index}", "full", None, None, None, author)["version_number"]
+        return api.generate_version(doc_id, f"change {index}", "full", None, None, None, "alice")["version_number"]
 
     with ThreadPoolExecutor(workers) as pool:
         numbers = list(pool.map(run, range(workers)))
@@ -443,9 +469,8 @@ def test_roles_gate_writes(client):
 
 def test_nobody_approves_a_version_they_generated(client):
     doc_id = upload_two_page_pdf(client)
-    response = client.post(f"/api/documents/{doc_id}/generate", data={"scope": "full", "description": "a"},
-                           headers=client.admin)  # admin may author and review, but not both on one version
-    version = response.json()
+    # admin may author and review, but not both on one version
+    version = generate(client, doc_id, description="a", headers=client.admin).json()
     url = f"/api/versions/{version['version_id']}/reviews"
     approve = {"decision": "approved", "feedback": "Checked by hand.", "password": PASSWORD}
     denied = client.post(url, data={**approve, "password": ADMIN_PASSWORD}, headers=client.admin)
@@ -621,3 +646,61 @@ def test_provider_and_fallback_are_recorded_per_version(client, monkeypatch):
     assert (stored["provider"], stored["fallback_used"], stored["fallback_reason"]) == ("ollama", 1, "gemini failed: RuntimeError: 503")
     event = client.get("/api/audit", headers=client.admin).json()["events"][0]
     assert event["payload"]["fallback_used"] is True
+
+
+# --- 3.2 background generation ---
+
+def test_generate_returns_202_and_the_job_reports_the_version(client):
+    doc_id = upload_two_page_pdf(client)
+    response = client.post(f"/api/documents/{doc_id}/generate", data={"description": "use torque 20Nm"})
+    assert response.status_code == 202
+    accepted = response.json()
+    assert accepted["status"] == "queued" and accepted["events_url"] == f"/api/jobs/{accepted['job_id']}/events"
+    job = wait_for_job(client, accepted["job_id"])
+    assert (job["status"], job["stage"], job["created_by"]) == ("succeeded", "done", "alice")
+    assert job["result"]["version_number"] == 1 and job["version_id"] == job["result"]["version_id"]
+
+
+def test_event_stream_reports_progress_then_the_result(client, monkeypatch):
+    gate = threading.Event()
+
+    def slow(**kwargs):
+        gate.wait(5)
+        return {"text": "DRAFT:\nx", "model": "stub-model"}
+
+    monkeypatch.setattr(api, "generate_sop", slow)
+    doc_id = upload_two_page_pdf(client)
+    job_id = client.post(f"/api/documents/{doc_id}/generate", data={"description": "x"}).json()["job_id"]
+    events = []
+    with client.stream("GET", f"/api/jobs/{job_id}/events") as stream:
+        assert stream.headers["content-type"].startswith("text/event-stream")
+        for line in stream.iter_lines():
+            if line.startswith("event: "):
+                events.append(line[7:])
+                gate.set()  # let the worker finish once the stream is open
+            elif line.startswith("data: ") and events[-1] == "succeeded":
+                assert json.loads(line[6:])["result"]["version_number"] == 1
+    assert events[0] == "progress" and events[-1] == "succeeded"
+
+
+def test_model_failure_ends_the_job_as_failed_with_the_reason(client, monkeypatch):
+    def broken(**kwargs):
+        raise RuntimeError("GEMINI_API_KEY is not configured.")
+
+    monkeypatch.setattr(api, "generate_sop", broken)
+    doc_id = upload_two_page_pdf(client)
+    outcome = generate(client, doc_id, description="x")
+    assert outcome.status_code == 502 and "GEMINI_API_KEY" in outcome.json()["detail"]
+    assert outcome.job["status"] == "failed"
+    assert client.get("/api/jobs/missing").status_code == 404
+
+
+def test_jobs_left_running_by_a_previous_process_are_marked_failed(client):
+    import sqlite3
+    doc_id = upload_two_page_pdf(client)
+    with sqlite3.connect(api.DB_PATH) as connection:
+        connection.execute("""INSERT INTO jobs (id, kind, document_id, created_by, status, stage, created_at, updated_at)
+                              VALUES ('old', 'generate', ?, 'alice', 'running', 'generating', 'x', 'x')""", (doc_id,))
+    api.fail_interrupted_jobs()
+    job = client.get("/api/jobs/old").json()
+    assert job["status"] == "failed" and "restart" in job["detail"]

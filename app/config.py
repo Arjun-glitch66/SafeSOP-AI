@@ -20,6 +20,10 @@ MAX_SOURCE_CHARS = 60_000
 MAX_DESCRIPTION_CHARS = 2000
 MAX_FEEDBACK_CHARS = 2000
 
+# Background generation: worker threads, and how long an event stream stays open.
+GENERATION_WORKERS = int(os.getenv("GENERATION_WORKERS", "2"))
+JOB_STREAM_SECONDS = 600
+
 # Authentication. JWT_SECRET must be set in production (any long random string); without it
 # a random per-process secret is used and every login ends when the API restarts.
 JWT_SECRET = os.getenv("JWT_SECRET", "")

@@ -145,6 +145,22 @@ def init_db():
                 UNIQUE(evaluation_id, finding_index, user)
             );
 
+            CREATE TABLE IF NOT EXISTS jobs (
+                id TEXT PRIMARY KEY,
+                kind TEXT NOT NULL,
+                document_id TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                status TEXT NOT NULL,          -- queued | running | succeeded | failed
+                stage TEXT NOT NULL,           -- queued | generating | saving | evaluating | done
+                http_status INTEGER,
+                detail TEXT,
+                version_id TEXT,
+                result_json TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(document_id) REFERENCES documents(id)
+            );
+
             CREATE TABLE IF NOT EXISTS users (
                 id TEXT PRIMARY KEY,
                 username TEXT NOT NULL UNIQUE,
