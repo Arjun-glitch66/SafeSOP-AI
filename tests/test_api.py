@@ -1,5 +1,7 @@
 """End-to-end API tests with Gemini stubbed and a temporary database."""
 import hashlib
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pymupdf
 import pytest
@@ -182,3 +184,22 @@ def test_approval_needs_reviewer_and_justification_when_checks_did_not_pass(clie
                                 "feedback": "Checked by hand: warning moved to step 1."})
     assert ok.status_code == 200
     assert client.get(f"/api/versions/{v1['version_id']}").json()["status"] == "approved"
+
+
+def test_concurrent_generations_get_distinct_version_numbers(client, monkeypatch):
+    doc_id = upload_two_page_pdf(client)
+    workers = 8
+    barrier = threading.Barrier(workers)
+
+    def slow_generate_sop(**kwargs):
+        barrier.wait(timeout=10)  # every request is past the (paid) model call before any insert
+        return {"text": "DRAFT:\nx", "model": "stub-model"}
+
+    monkeypatch.setattr(api, "generate_sop", slow_generate_sop)
+
+    def run(index):
+        return api.generate_revision(doc_id, f"change {index}", "full", None, None)["version_number"]
+
+    with ThreadPoolExecutor(workers) as pool:
+        numbers = list(pool.map(run, range(workers)))
+    assert sorted(numbers) == list(range(1, workers + 1))

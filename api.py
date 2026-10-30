@@ -569,43 +569,26 @@ def generate_revision(
     version_file = VERSION_DIR / f"{version_id}.md"
 
     try:
-        with connect_db() as connection:
-            next_version = connection.execute(
-                """
-                SELECT COALESCE(MAX(version_number), 0) + 1 AS next_number
-                FROM versions WHERE document_id = ?
-                """,
-                (document_id,),
-            ).fetchone()["next_number"]
-
-            version_file.write_text(generated_text, encoding="utf-8")
-            connection.execute(
-                """
-                INSERT INTO versions
-                    (id, document_id, request_id, version_number,
-                     content, status, created_at, source_document_id,
-                     parent_version_id, target_page, model, prompt_version,
-                     input_tokens, output_tokens, temperature, structured_output)
-                VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    version_id,
-                    document_id,
-                    request_id,
-                    next_version,
-                    generated_text,
-                    created_version,
-                    document_id,
-                    parent_version_id or None,
-                    resolved_page,
-                    result.get("model"),
-                    result.get("prompt_version"),
-                    result.get("input_tokens"),
-                    result.get("output_tokens"),
-                    result.get("temperature"),
-                    result.get("structured_output"),
-                ),
-            )
+        version_file.write_text(generated_text, encoding="utf-8")
+        next_version = insert_numbered_version(
+            document_id,
+            (
+                version_id,
+                document_id,
+                request_id,
+                generated_text,
+                created_version,
+                document_id,
+                parent_version_id or None,
+                resolved_page,
+                result.get("model"),
+                result.get("prompt_version"),
+                result.get("input_tokens"),
+                result.get("output_tokens"),
+                result.get("temperature"),
+                result.get("structured_output"),
+            ),
+        )
     except Exception as exc:
         if version_file.exists():
             version_file.unlink()
@@ -640,6 +623,41 @@ def generate_revision(
         "created_at": created_version,
         "safety_evaluation": evaluation,
     }
+
+
+def insert_numbered_version(document_id, values, attempts=3):
+    """Insert a version as MAX(version_number) + 1 and return that number.
+
+    BEGIN IMMEDIATE takes SQLite's write lock before the MAX() read, so concurrent
+    generations (each already paid for) are numbered one after another instead of
+    colliding. UNIQUE(document_id, version_number) is the backstop; retry if it fires.
+    """
+    for attempt in range(attempts):
+        connection = connect_db()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            next_version = connection.execute(
+                "SELECT COALESCE(MAX(version_number), 0) + 1 FROM versions WHERE document_id = ?",
+                (document_id,),
+            ).fetchone()[0]
+            connection.execute(
+                """
+                INSERT INTO versions
+                    (id, document_id, request_id, content, created_at, source_document_id,
+                     parent_version_id, target_page, model, prompt_version, input_tokens,
+                     output_tokens, temperature, structured_output, version_number, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')
+                """,
+                (*values, next_version),
+            )
+            connection.commit()
+            return next_version
+        except sqlite3.IntegrityError as exc:
+            connection.rollback()
+            if "UNIQUE" not in str(exc) or attempt == attempts - 1:
+                raise
+        finally:
+            connection.close()
 
 
 def run_and_save_evaluation(version_id, original_text, generated_text, change_request):
