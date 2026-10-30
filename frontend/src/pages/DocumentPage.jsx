@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { ArrowDownToLine, BookOpen, Check, CheckCircle2, FileClock, FileText, Files, History, ShieldCheck, Sparkles, Workflow, X } from "lucide-react";
 import { createChangeRequest, downloadOriginal, followJob, generateRevision, getDocument, getDocumentVersions, getOutline } from "../api.js";
 import { Badge, EmptyState } from "../components/ui.jsx";
-import { evaluationLabel, evaluationTone, statusLabel, statusTone } from "../components/labels.js";
+import { LANGUAGES, evaluationLabel, evaluationTone, statusLabel, statusTone } from "../components/labels.js";
 import { useAuth, useBackend, useNotice, useResource, useTitle } from "../state.jsx";
 
 const SCOPES = [
@@ -62,6 +62,7 @@ function RequestForm({ doc, onGenerated }) {
   const [parent, setParent] = useState(parentFromVersion || null);
   const [scope, setScope] = useState(parentFromVersion?.scope || "full");
   const [targetSection, setTargetSection] = useState(parentFromVersion?.target_section || "");
+  const [outputLanguage, setOutputLanguage] = useState(parentFromVersion?.output_language || "");
   const outline = useResource(() => getOutline(doc.id), [doc.id]);
   const parts = scope === "section" ? outline.data?.sections || [] : scope === "step" ? outline.data?.steps || [] : [];
   const [targetPage, setTargetPage] = useState(String(parentFromVersion?.target_page || 1));
@@ -95,7 +96,7 @@ function RequestForm({ doc, onGenerated }) {
       // The backend always reads the immutable original PDF, never a previous draft.
       // It answers at once with a job; the model call runs in the background.
       const accepted = await generateRevision(doc.id, {
-        description: changeRequest.trim(), scope, targetPage: Number(targetPage), targetSection,
+        description: changeRequest.trim(), scope, targetPage: Number(targetPage), targetSection, outputLanguage,
         parentVersionId: parent?.id, requestId,
       });
       setStage(accepted.stage_text);
@@ -159,6 +160,13 @@ function RequestForm({ doc, onGenerated }) {
 
       <label className="field-label" htmlFor="change-request">Requested change <span className="required">*</span></label>
       <textarea id="change-request" className="form-textarea" maxLength={2000} value={changeRequest} onChange={(event) => setChangeRequest(event.target.value)} placeholder="Describe what changed, why it changed, and which safety requirements must remain unchanged..." rows={6} />
+
+      <label className="field-label" htmlFor="output-language">Also translate into</label>
+      <select id="output-language" className="form-input" value={outputLanguage} onChange={(event) => setOutputLanguage(event.target.value)}>
+        <option value="">No translation (English only)</option>
+        {Object.entries(LANGUAGES).map(([code, name]) => <option key={code} value={code}>{name}</option>)}
+      </select>
+      {outputLanguage && <p className="small-note">The English draft stays the controlled text and is checked as usual. The translation is checked by translating it back to English; a native speaker must still review it.</p>}
 
       {parent && <div className="form-note"><History size={16} /><span>Regenerating from version {parent.version_number}. The new draft is still generated from the <strong>original PDF</strong>; version {parent.version_number} is only recorded as its parent. <button className="text-button" onClick={() => setParent(null)}>Clear</button></span></div>}
       <div className="form-note"><ShieldCheck size={16} /><span>Safety warnings and critical prerequisites must be preserved or explicitly flagged for qualified review.</span></div>

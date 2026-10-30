@@ -22,6 +22,7 @@ STAGE_TEXT = {
     "queued": "Waiting for a free worker",
     "generating": "Waiting for the model to write the draft",
     "saving": "Saving the draft as a new version",
+    "translating": "Translating, then translating back to check nothing was lost",
     "evaluating": "Running the automated checks",
     "done": "Done",
 }

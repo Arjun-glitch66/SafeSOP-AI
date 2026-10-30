@@ -31,10 +31,21 @@ def add_source_pages(findings, original_text, target_page=None):
     return findings
 
 
+STATUS_RANK = {"pass_automated": 0, "needs_review": 1, "fail": 2}
+
+
+def with_extra_findings(evaluation, extra):
+    severities = {finding["severity"] for finding in extra}
+    floor = "fail" if severities & {"critical", "high"} else "needs_review" if "review" in severities else "pass_automated"
+    status = max(evaluation["status"], floor, key=STATUS_RANK.__getitem__)
+    return {**evaluation, "status": status, "findings": evaluation["findings"] + extra}
+
+
 def run_and_save_evaluation(version_id, original_text, generated_text, change_request, structured=None,
-                            target_page=None, document_type=None):
+                            target_page=None, document_type=None, extra_findings=None):
     """Run the automated checks and store them. An evaluator crash must not lose the saved draft.
-    Prompt-v3 drafts (with structured JSON) are matched by source id; older ones by text."""
+    Prompt-v3 drafts (with structured JSON) are matched by source id; older ones by text.
+    extra_findings (e.g. from the translation check) are added and can only raise the status."""
     evaluation_id = str(uuid.uuid4())
     created = now()
     try:
@@ -45,6 +56,8 @@ def run_and_save_evaluation(version_id, original_text, generated_text, change_re
             evaluation = evaluate_revision(original_text, generated_text, change_request, document_type)
         # Off unless SEMANTIC_CHECK=nli|llm. Advisory: may add findings / raise status, never lower it.
         evaluation = apply_semantic_check(evaluation, original_text, generated_text)
+        if extra_findings:
+            evaluation = with_extra_findings(evaluation, extra_findings)
         add_source_pages(evaluation["findings"], original_text, target_page)
         with connect_db() as connection:
             connection.execute(
@@ -79,7 +92,8 @@ def load_version_source(version_id):
     with connect_db() as connection:
         row = connection.execute(
             """
-            SELECT v.content, v.target_page, v.version_number, v.structured_json, d.stored_path, d.filename, d.document_type,
+            SELECT v.content, v.target_page, v.version_number, v.structured_json, v.output_language, v.back_translation,
+                   d.stored_path, d.filename, d.document_type,
                    cr.description, cr.scope
             FROM versions v
             JOIN documents d ON d.id = v.document_id

@@ -16,6 +16,7 @@ from app.services.sections import locate, part_text, splice
 from app.storage import resolve
 from src.safety_evaluator import extract_draft_section
 from src.sop_generator import generate_sop, render_part_lines, render_summaries
+from src.translator import LANGUAGES, translate_with_check, translation_findings
 
 logger = logging.getLogger("safesop")
 
@@ -24,17 +25,17 @@ PART_SCOPES = {"section", "step"}
 
 
 def generate_version(document_id, description, scope, target_page, parent_version_id, request_id, created_by,
-                     target_section=None):
+                     target_section=None, output_language=None):
     """
     Generate and save an AI draft in the calling thread. This is not safety approval.
     The API runs the same two steps with run_generation() on a background worker.
     """
     return run_generation(prepare_generation(document_id, description, scope, target_page, parent_version_id,
-                                             request_id, created_by, target_section))
+                                             request_id, created_by, target_section, output_language))
 
 
 def prepare_generation(document_id, description, scope, target_page, parent_version_id, request_id, created_by,
-                       target_section=None):
+                       target_section=None, output_language=None):
     """
     Everything that can fail fast, before the (slow, billed) model call: input checks, limits,
     reading the original PDF and recording the change request. Raises HTTPException 4xx.
@@ -98,6 +99,11 @@ def prepare_generation(document_id, description, scope, target_page, parent_vers
     if scope not in SCOPES:
         raise HTTPException(status_code=400, detail="Scope must be 'full', 'page', 'section' or 'step'.")
     target_section = (target_section or "").strip().upper() or None
+    output_language = (output_language or "").strip().lower() or None
+    if output_language in ("en", "english"):
+        output_language = None
+    if output_language and output_language not in LANGUAGES:
+        raise HTTPException(status_code=400, detail=f"output_language must be one of: {', '.join(LANGUAGES)} (or en).")
     if scope in PART_SCOPES and not target_section:
         raise HTTPException(status_code=400, detail=f"For {scope} scope, choose target_section (see the document outline).")
 
@@ -139,7 +145,7 @@ def prepare_generation(document_id, description, scope, target_page, parent_vers
     return {
         "document_id": document_id, "filename": document["filename"], "document_type": document["document_type"],
         "description": description, "scope": scope, "target_section": target_section,
-        "full_text": full_text, "span": span,
+        "full_text": full_text, "span": span, "output_language": output_language,
         "original_text": original_text, "resolved_page": resolved_page, "parent_version_id": parent_version_id or None,
         "request_id": request_id, "review_feedback": review_feedback, "created_by": created_by,
     }
@@ -231,9 +237,14 @@ def run_generation(prepared, progress=lambda stage: None):
                    "Check the backend terminal.",
         ) from exc
 
+    extra_findings = None
+    if prepared["output_language"]:
+        progress("translating")
+        extra_findings = translate_version(version_id, generated_text, prepared["output_language"])
+
     progress("evaluating")
     evaluation = run_and_save_evaluation(version_id, evaluate_against, generated_text, description,
-                                         evaluate_structured, resolved_page, prepared["document_type"])
+                                         evaluate_structured, resolved_page, prepared["document_type"], extra_findings)
 
     return {
         "id": version_id,
@@ -249,6 +260,7 @@ def run_generation(prepared, progress=lambda stage: None):
         "parent_version_id": parent_version_id or None,
         "target_page": resolved_page,
         "target_section": prepared["target_section"],
+        "output_language": prepared["output_language"],
         "model": result.get("model"),
         "prompt_version": result.get("prompt_version"),
         "temperature": result.get("temperature"),
@@ -301,3 +313,24 @@ def insert_numbered_version(document_id, values, audit, attempts=3):
                 raise
         finally:
             connection.close()
+
+
+def translate_version(version_id, english_text, language):
+    """Translate the saved draft, back-translate it, store both, and return the findings of the
+    back-translation check. A failed translation keeps the English draft and adds a review finding."""
+    try:
+        translated, back = translate_with_check(english_text, language)
+    except Exception as exc:
+        logger.exception("Translation to %s failed for version %s", language, version_id)
+        translated = back = None
+        findings = [{"type": "translation_failed", "severity": "review",
+                     "detail": f"The {LANGUAGES[language]} translation could not be produced "
+                               f"({type(exc).__name__}). The English draft is saved and checked as usual."}]
+    else:
+        findings = translation_findings(english_text, back, language)
+    with connect_db() as connection:
+        connection.execute(
+            "UPDATE versions SET output_language = ?, translated_content = ?, back_translation = ? WHERE id = ?",
+            (language, translated, back, version_id),
+        )
+    return findings

@@ -102,12 +102,12 @@ function partFields(scope, targetPage, targetSection) {
 
 export const getOutline = (documentId) => request(`/api/documents/${id(documentId)}/outline`);
 
-export function generateRevision(documentId, { description, scope = "full", targetPage = null, targetSection = null, parentVersionId = null, requestId = null, signal } = {}) {
+export function generateRevision(documentId, { description, scope = "full", targetPage = null, targetSection = null, outputLanguage = "", parentVersionId = null, requestId = null, signal } = {}) {
   const fields = requestId
     ? { request_id: requestId }
     : { description, scope, ...partFields(scope, targetPage, targetSection) };
   return request(`/api/documents/${id(documentId)}/generate`, {
-    method: "POST", signal, body: form({ ...fields, parent_version_id: parentVersionId }),
+    method: "POST", signal, body: form({ ...fields, parent_version_id: parentVersionId, output_language: outputLanguage || null }),
   });
 }
 
@@ -164,5 +164,7 @@ async function saveFile(path, filename) {
 }
 export const downloadVersion = (versionId, versionNumber, format = "txt") =>
   saveFile(`/api/versions/${id(versionId)}/download?format=${format}`, `SafeSOP-v${versionNumber}.${format}`);
+export const downloadTranslation = (versionId, versionNumber, language) =>
+  saveFile(`/api/versions/${id(versionId)}/download?format=txt&variant=translation`, `SafeSOP-v${versionNumber}-${language}.txt`);
 export const downloadOriginal = (documentId, filename) =>
   saveFile(`/api/documents/${id(documentId)}/original`, filename);

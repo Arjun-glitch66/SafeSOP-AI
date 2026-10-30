@@ -860,3 +860,39 @@ def test_part_scope_needs_an_existing_target(client):
     missing = generate(client, doc_id, description="x", scope="section", target_section="SEC9")
     assert missing.status_code == 400 and "SEC1, SEC2, SEC3" in missing.json()["detail"]
     assert client.prompts == []
+
+
+# --- 3.10 regional-language output ---
+
+def test_translated_output_is_stored_checked_and_downloadable(client, monkeypatch):
+    doc_id = upload_two_page_pdf(client)
+    # Back-translation loses the source warning that the English draft kept.
+    english = "DRAFT:\nPAGE ONE: WARNING disconnect power\nREVISED"
+    monkeypatch.setattr(api, "generate_sop", lambda **kwargs: {"text": english, "model": "stub-model"})
+    monkeypatch.setattr(api, "translate_with_check", lambda text, language: ("[hi] अनुवाद", "REVISED"))
+    assert generate(client, doc_id, description="x", output_language="xx").status_code == 400
+
+    version = generate(client, doc_id, description="disconnect power", output_language="hi").json()
+    evaluation = version["safety_evaluation"]
+    assert version["output_language"] == "hi"
+    assert any(f["type"] == "translation_missing_warning" for f in evaluation["findings"])
+    assert evaluation["status"] == "fail"
+    stored = client.get(f"/api/versions/{version['version_id']}").json()
+    assert (stored["translated_content"], stored["back_translation"]) == ("[hi] अनुवाद", "REVISED")
+    rerun = client.post(f"/api/versions/{version['version_id']}/evaluate").json()
+    assert any(f["type"] == "translation_missing_warning" for f in rerun["findings"])  # no new model calls
+    download = client.get(f"/api/versions/{version['version_id']}/download?variant=translation")
+    assert download.status_code == 200 and "MACHINE TRANSLATION (Hindi)" in download.text and "अनुवाद" in download.text
+
+
+def test_failed_translation_keeps_the_english_draft_and_asks_for_review(client, monkeypatch):
+    doc_id = upload_two_page_pdf(client)
+
+    def broken(text, language):
+        raise RuntimeError("provider down")
+
+    monkeypatch.setattr(api, "translate_with_check", broken)
+    version = generate(client, doc_id, description="x", output_language="ta").json()
+    assert any(f["type"] == "translation_failed" and f["severity"] == "review"
+               for f in version["safety_evaluation"]["findings"])
+    assert client.get(f"/api/versions/{version['version_id']}/download?variant=translation").status_code == 404

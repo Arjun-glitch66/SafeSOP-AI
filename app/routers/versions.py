@@ -18,6 +18,7 @@ from app.services.evaluation import load_version_source, run_and_save_evaluation
 from app.services.generation import prepare_generation
 from app.services.pdf import render_draft_pdf
 from src.safety_evaluator import extract_draft_section, extract_warnings, text_lines
+from src.translator import LANGUAGES, translation_findings
 
 router = APIRouter()
 
@@ -31,6 +32,7 @@ def generate_revision(
     parent_version_id: str | None = Form(None),
     request_id: str | None = Form(None),
     target_section: str | None = Form(None, max_length=20),
+    output_language: str | None = Form(None, max_length=10),
     user=Depends(require_role("author")),
 ):
     """
@@ -44,7 +46,8 @@ def generate_revision(
     """
     check_generate_allowed(user["username"])  # 429 before any work
     prepared = prepare_generation(document_id, description, scope, target_page, parent_version_id, request_id,
-                                  created_by=user["username"], target_section=target_section)
+                                  created_by=user["username"], target_section=target_section,
+                                  output_language=output_language)
     job = jobs.submit(prepared)
     return JSONResponse(status_code=202, content={
         "job_id": job["id"], "status": job["status"], "stage_text": job["stage_text"],
@@ -86,8 +89,11 @@ def evaluate_version(version_id: str):
     """Re-run the automated checks, e.g. for versions created before the evaluator existed."""
     row, original_text = load_version_source(version_id)
     structured = json.loads(row["structured_json"]) if row["structured_json"] else None
+    # The translation check is repeated on the stored back-translation; no new model calls.
+    extra = (translation_findings(row["content"], row["back_translation"], row["output_language"])
+             if row["output_language"] and row["back_translation"] else None)
     return run_and_save_evaluation(version_id, original_text, row["content"], row["description"] or "", structured,
-                                   row["target_page"], row["document_type"])
+                                   row["target_page"], row["document_type"], extra)
 
 
 @router.get("/api/versions/{version_id}/diff")
@@ -227,14 +233,17 @@ def get_version_content(version_id: str):
 
 
 @router.get("/api/versions/{version_id}/download")
-def download_version(version_id: str, format: str = "txt"):
+def download_version(version_id: str, format: str = "txt", variant: str = "draft"):
     if format not in {"txt", "pdf"}:
         raise HTTPException(status_code=400, detail="format must be 'txt' or 'pdf'.")
+    if variant not in {"draft", "translation"}:
+        raise HTTPException(status_code=400, detail="variant must be 'draft' or 'translation'.")
 
     with connect_db() as connection:
         row = connection.execute(
             """
             SELECT v.version_number, v.content, v.created_at, v.status, d.filename,
+                   v.output_language, v.translated_content,
                    (SELECT e.status FROM evaluations e WHERE e.version_id = v.id
                     ORDER BY e.created_at DESC LIMIT 1) AS evaluation_status
             FROM versions v JOIN documents d ON d.id = v.document_id
@@ -245,6 +254,17 @@ def download_version(version_id: str, format: str = "txt"):
 
     if not row:
         raise HTTPException(status_code=404, detail="Version not found.")
+
+    if variant == "translation":
+        if not row["translated_content"] or format != "txt":
+            raise HTTPException(status_code=404, detail="This version has no translation (text download only).")
+        language = LANGUAGES[row["output_language"]]
+        body = (f"MACHINE TRANSLATION ({language}) OF AI-GENERATED DRAFT v{row['version_number']} - review status: "
+                f"{row['status']}. Checked only by back-translation; a native-speaker reviewer must check it. "
+                f"The English draft is the controlled text.\n\n{row['translated_content']}")
+        name = f"SafeSOP-v{row['version_number']}-{row['output_language']}.txt"
+        return Response(body, media_type="text/plain; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
     filename = f"SafeSOP-v{row['version_number']}.{format}"
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}

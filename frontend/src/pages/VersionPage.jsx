@@ -1,10 +1,10 @@
 import { Link, useNavigate, useParams } from "react-router";
 import { ArrowDownToLine, ClipboardCheck, FileText, RefreshCw } from "lucide-react";
-import { downloadVersion, getReviews, getVersion } from "../api.js";
+import { downloadTranslation, downloadVersion, getReviews, getVersion } from "../api.js";
 import ReviewTimeline from "../components/ReviewTimeline.jsx";
 import VersionEvidence from "../components/VersionEvidence.jsx";
 import { Badge, EmptyState } from "../components/ui.jsx";
-import { evaluationLabel, evaluationTone, statusLabel, statusTone } from "../components/labels.js";
+import { LANGUAGES, evaluationLabel, evaluationTone, statusLabel, statusTone } from "../components/labels.js";
 import { useAuth, useNotice, useResource, useTitle } from "../state.jsx";
 
 export default function VersionPage() {
@@ -46,6 +46,13 @@ export default function VersionPage() {
       </div>
 
       <VersionEvidence versionId={v.id} onEvaluated={version.reload} />
+      {v.translated_content && <section className="panel" aria-labelledby="translation-heading">
+        <div className="panel-heading">
+          <div><h2 id="translation-heading">{LANGUAGES[v.output_language]} translation</h2><p>Machine translation of this draft, checked by an independent back-translation (findings marked "translation" above). A native-speaker reviewer must read it; the English draft is the controlled text.</p></div>
+          <button className="btn btn-secondary" onClick={() => downloadTranslation(v.id, v.version_number, v.output_language).catch((error) => show(`Download failed: ${error.message}`, "error"))}><ArrowDownToLine size={16} /> Translation (.txt)</button>
+        </div>
+        <pre className="draft-output" lang={v.output_language}>{v.translated_content}</pre>
+      </section>}
       <ReviewTimeline reviews={reviews} status={v.status} />
     </>
   );
