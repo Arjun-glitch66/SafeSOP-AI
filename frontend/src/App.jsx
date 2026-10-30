@@ -9,11 +9,15 @@ import {
   PanelLeftClose, Shield, ShieldCheck, X,
 } from "lucide-react";
 import { evaluationLabel } from "./components/labels.js";
+import ErrorBoundary from "./components/ErrorBoundary.jsx";
 import Overview from "./pages/Overview.jsx";
 import Documents from "./pages/Documents.jsx";
 import RevisionStudio from "./pages/RevisionStudio.jsx";
 import SafetyQuality from "./pages/SafetyQuality.jsx";
 import VersionHistory from "./pages/VersionHistory.jsx";
+
+const HEALTH_POLL_MS = 15000;
+const mobileQuery = window.matchMedia("(max-width: 800px)");  // same breakpoint as index.css
 
 const navigation = [
   { label: "Overview", icon: LayoutDashboard, group: "Workspace", page: Overview },
@@ -28,6 +32,7 @@ export default function App() {
   const [activePage, setActivePage] = useState("Overview");
   const [collapsed, setCollapsed] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
+  const [isMobile, setIsMobile] = useState(mobileQuery.matches);
   const [query, setQuery] = useState("");
   const [notice, setNotice] = useState(null);
   const [backendOnline, setBackendOnline] = useState(false);
@@ -62,13 +67,15 @@ export default function App() {
   // ignored, so a slow reply can never fill the screen with another item's data.
   const currentDocumentId = useRef(null);
   const currentVersionId = useRef(null);
+  const noticeTimer = useRef(null);
 
   const selectedVersion = versions.find((version) => version.id === selectedVersionId);
   const totalVersions = documents.reduce((sum, document) => sum + (document.version_count || 0), 0);
 
   function showNotice(message, tone = "success") {
     setNotice({ message, tone });
-    window.setTimeout(() => setNotice(null), 6000);
+    window.clearTimeout(noticeTimer.current);  // a new toast gets its own full 6 seconds
+    noticeTimer.current = window.setTimeout(() => setNotice(null), 6000);
   }
 
   async function refreshVersions(documentId) {
@@ -82,19 +89,36 @@ export default function App() {
     }
   }
 
+  // Poll the backend so a server started (or restarted) later is picked up without a reload.
   useEffect(() => {
-    async function loadBackendData() {
+    let online = false;
+    async function poll() {
       try {
         await checkBackend();
-        setBackendOnline(true);
-        setDocuments(await getDocuments());
-        setEvaluatorVersion((await getEvaluationStatus()).evaluator_version);
+        if (!online) {  // just (re)connected: load what could not be loaded while offline
+          setDocuments(await getDocuments());
+          setEvaluatorVersion((await getEvaluationStatus()).evaluator_version);
+        }
+        online = true;
       } catch {
-        setBackendOnline(false);
+        online = false;
       }
+      setBackendOnline(online);
     }
-    loadBackendData();
+    poll();
+    const timer = window.setInterval(poll, HEALTH_POLL_MS);
+    return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    const update = () => setIsMobile(mobileQuery.matches);
+    mobileQuery.addEventListener("change", update);
+    return () => mobileQuery.removeEventListener("change", update);
+  }, []);
+
+  useEffect(() => {
+    document.title = `${activePage} · SafeSOP AI`;
+  }, [activePage]);
 
   // Switching source document resets everything that belongs to the previous one.
   useEffect(() => {
@@ -113,7 +137,9 @@ export default function App() {
     refreshVersions(documentId);
     getDocument(documentId)
       .then((details) => { if (currentDocumentId.current === documentId) setPageCount(details.page_count); })
-      .catch(() => {});
+      .catch((error) => {
+        if (currentDocumentId.current === documentId) showNotice(`Could not load page count: ${error.message}`, "error");
+      });
   }, [file?.id]);
 
   async function uploadFile(selected) {
@@ -299,7 +325,8 @@ export default function App() {
   return (
     <div className={`app-shell ${collapsed ? "sidebar-collapsed" : ""}`}>
       {mobileNav && <button className="mobile-backdrop" onClick={() => setMobileNav(false)} aria-label="Close navigation" />}
-      <aside className={`sidebar ${mobileNav ? "mobile-open" : ""}`}>
+      {/* Off-screen on mobile while closed: inert keeps it out of the tab order and screen readers. */}
+      <aside id="sidebar" className={`sidebar ${mobileNav ? "mobile-open" : ""}`} inert={isMobile && !mobileNav}>
         <div className="brand">
           <div className="brand-mark"><ShieldCheck size={22} /></div>
           <div className="brand-text">SafeSOP<span>AI</span><small>Controlled SOP revision</small></div>
@@ -325,12 +352,12 @@ export default function App() {
 
       <main className="main-area">
         <header className="topbar">
-          <div className="topbar-left"><button className="icon-button mobile-menu" onClick={() => setMobileNav(true)} aria-label="Open navigation"><Menu size={20} /></button><div className="breadcrumbs"><span>Workspace</span><ChevronRight size={14} /><strong>{activePage}</strong></div></div>
+          <div className="topbar-left"><button className="icon-button mobile-menu" onClick={() => setMobileNav(true)} aria-label="Open navigation" aria-expanded={mobileNav} aria-controls="sidebar"><Menu size={20} /></button><div className="breadcrumbs"><span>Workspace</span><ChevronRight size={14} /><strong>{activePage}</strong></div></div>
           <div className="topbar-right">{file && <button className="topbar-source" title="Change source document" onClick={() => navigate("Documents")}><FileText size={15} /><span>{file.name}</span></button>}</div>
         </header>
 
         <div className="page-content">
-          <Page app={app} />
+          <ErrorBoundary key={activePage}><Page app={app} /></ErrorBoundary>
           <footer className="app-footer"><span><ShieldCheck size={14} /> SafeSOP AI prototype</span><span>AI drafts are never safety-approved without a qualified reviewer.</span></footer>
         </div>
       </main>

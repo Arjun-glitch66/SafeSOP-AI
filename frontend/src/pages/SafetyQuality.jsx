@@ -15,7 +15,7 @@ export default function SafetyQuality({ app }) {
 
   return (
     <>
-      <div className="page-intro"><div><h2>Safety & quality</h2><p>Automated checks compare each draft with the original PDF. They flag problems for a reviewer; they never approve a draft.</p></div><Badge tone="amber" dot>Human review required</Badge></div>
+      <div className="page-intro"><div><h1>Safety & quality</h1><p>Automated checks compare each draft with the original PDF. They flag problems for a reviewer; they never approve a draft.</p></div><Badge tone="amber" dot>Human review required</Badge></div>
       <section className="panel">
         <div className="panel-heading">
           <div><h3>{selectedVersion ? `Version ${selectedVersion.version_number} · ${file?.name}` : "No version selected"}</h3><p>{versionEvaluation ? `Evaluated ${new Date(versionEvaluation.created_at).toLocaleString()} with ${versionEvaluation.evaluator_version}` : selectedVersion ? "This version has no saved evaluation yet." : "Generate a draft, or open a version in Version History."}</p></div>

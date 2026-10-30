@@ -5,6 +5,8 @@ import { Badge, EmptyState } from "../components/ui.jsx";
 import { evaluationLabel, evaluationTone, statusLabel, statusTone } from "../components/labels.js";
 import { originalDownloadUrl, versionDownloadUrl } from "../api.js";
 
+const TABS = [["diff", "Compare with original"], ["text", "Full model output"]];
+
 export default function VersionHistory({ app }) {
   const {
     file, versions, selectedVersion, openVersion, versionEvaluation, versionContent, reviews,
@@ -26,6 +28,16 @@ export default function VersionHistory({ app }) {
   const filtered = versions.filter((version) =>
     `v${version.version_number} ${version.status} ${version.change_request || ""}`.toLowerCase().includes(query.toLowerCase()));
   const parentNumber = item?.parent_version_id && versions.find((v) => v.id === item.parent_version_id)?.version_number;
+  // Arrow keys / Home / End move between tabs (WAI-ARIA tabs pattern, automatic activation).
+  function onTabKeyDown(event) {
+    const index = TABS.findIndex(([id]) => id === view);
+    const next = { ArrowRight: index + 1, ArrowLeft: index - 1, Home: 0, End: TABS.length - 1 }[event.key];
+    if (next === undefined) return;
+    event.preventDefault();
+    const [id] = TABS[(next + TABS.length) % TABS.length];
+    setView(id);
+    document.getElementById(`tab-${id}`)?.focus();
+  }
   const counts = (severity) => versionEvaluation?.findings?.filter((f) => f.severity === severity).length ?? 0;
 
   return (
@@ -77,17 +89,21 @@ export default function VersionHistory({ app }) {
           </div>
           </>}
 
-        <div className="view-tabs" role="tablist" aria-label="Draft view">
-          <button role="tab" aria-selected={view === "diff"} className={view === "diff" ? "active" : ""} onClick={() => setView("diff")}>Compare with original</button>
-          <button role="tab" aria-selected={view === "text"} className={view === "text" ? "active" : ""} onClick={() => setView("text")}>Full model output</button>
+        <div className="view-tabs" role="tablist" aria-label="Draft view" onKeyDown={onTabKeyDown}>
+          {TABS.map(([id, label]) => (
+            <button key={id} id={`tab-${id}`} role="tab" aria-selected={view === id} aria-controls={`tabpanel-${id}`} tabIndex={view === id ? 0 : -1}
+              className={view === id ? "active" : ""} onClick={() => setView(id)}>{label}</button>
+          ))}
         </div>
-        {/* key remounts the diff per version, so it never shows the previous version's result or error */}
-        {view === "diff" ? <DiffView key={item.id} versionId={item.id} /> : <pre className="draft-output">{versionContent || "Loading version content..."}</pre>}
+        <div role="tabpanel" id={`tabpanel-${view}`} aria-labelledby={`tab-${view}`} tabIndex={0}>
+          {/* key remounts the diff per version, so it never shows the previous version's result or error */}
+          {view === "diff" ? <DiffView key={item.id} versionId={item.id} /> : <pre className="draft-output">{versionContent || "Loading version content..."}</pre>}
+        </div>
       </section>}
     </>
   );
 }
 
 function Intro() {
-  return <div className="page-intro"><div><h2>Version history</h2><p>Every generated draft for the selected SOP, with its checks and review decisions.</p></div><Badge tone="blue"><History size={12} /> Version control</Badge></div>;
+  return <div className="page-intro"><div><h1>Version history</h1><p>Every generated draft for the selected SOP, with its checks and review decisions.</p></div><Badge tone="blue"><History size={12} /> Version control</Badge></div>;
 }

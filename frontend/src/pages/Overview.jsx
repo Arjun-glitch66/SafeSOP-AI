@@ -15,7 +15,7 @@ export default function Overview({ app }) {
         <div className="title-block-head">
           <div>
             <p className="title-block-kicker">{file ? "Selected source document" : "Get started"}</p>
-            <h2>{file ? file.name.replace(/\.pdf$/i, "").replaceAll("_", " ") : "No SOP selected"}</h2>
+            <h1>{file ? file.name.replace(/\.pdf$/i, "").replaceAll("_", " ") : "No SOP selected"}</h1>
             <p>{file
               ? "Every draft is generated from this original PDF and needs a qualified reviewer's sign-off before use."
               : "Upload an SOP PDF and describe the process change. SafeSOP drafts the revision, checks it against the original, and keeps every version for review."}</p>

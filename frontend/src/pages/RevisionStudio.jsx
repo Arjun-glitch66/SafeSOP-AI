@@ -26,7 +26,7 @@ export default function RevisionStudio({ app }) {
 
   return (
     <>
-      <div className="page-intro"><div><h2>Revision studio</h2><p>Describe the process change and choose what to regenerate. The draft is always built from the original PDF.</p></div><Badge tone="amber" dot>Draft workspace</Badge></div>
+      <div className="page-intro"><div><h1>Revision studio</h1><p>Describe the process change and choose what to regenerate. The draft is always built from the original PDF.</p></div><Badge tone="amber" dot>Draft workspace</Badge></div>
 
       <div className="content-grid revision-grid">
         <section className="panel">

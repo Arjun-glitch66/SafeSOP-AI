@@ -18,7 +18,7 @@ export default function Documents({ app }) {
   return (
     <>
       <div className="page-intro">
-        <div><h2>Documents</h2><p>Upload the source SOP first. The original PDF is stored as-is and never overwritten.</p></div>
+        <div><h1>Documents</h1><p>Upload the source SOP first. The original PDF is stored as-is and never overwritten.</p></div>
         <button className="btn btn-primary" onClick={() => fileInput.current?.click()} disabled={uploading || !backendOnline}><Upload size={16} /> {uploading ? "Uploading..." : "Upload document"}</button>
       </div>
 
