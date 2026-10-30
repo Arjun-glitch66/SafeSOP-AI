@@ -2,9 +2,10 @@ import os
 from typing import Literal
 
 from dotenv import load_dotenv
-from google import genai
-from google.genai import types
+from google import genai  # noqa: F401  (tests patch genai.Client through this module)
 from pydantic import BaseModel
+
+from src import llm_client
 
 # Same numbering as the evaluator, so the ids mean the same thing to the prompt and the checks.
 from src.safety_evaluator import number_source_items
@@ -19,7 +20,6 @@ load_dotenv()
 PROMPT_VERSION = "v3"
 
 DEFAULT_TEMPERATURE = 0.2  # low: revisions should stay close to the source
-RETRY_STATUS_CODES = [429, 500, 502, 503, 504]
 
 
 class DraftStep(BaseModel):
@@ -165,6 +165,21 @@ source_limitations: any information that could not be verified from the supplied
 """
 
 
+def check_complete_draft(result):
+    """Reject output that cannot be a draft (cut off mid-JSON, blocked, or empty), so no
+    version is ever saved from a fragment. Raising here also lets the fallback provider run."""
+    parsed = result["parsed"]
+    if not isinstance(parsed, SopDraft) or not any(
+            step.change_type != "removed" and step.text.strip() for step in parsed.steps) and not any(
+            warning.text.strip() for warning in parsed.warnings):
+        reason = result.get("finish_reason")
+        raise RuntimeError(
+            f"{result['provider'].capitalize()} did not return a complete structured draft"
+            + (f" (finish reason: {reason})" if reason else "")
+            + ". No version was saved; try again or shorten the source."
+        )
+
+
 def generate_sop(
     original_text,
     change_request,
@@ -174,22 +189,8 @@ def generate_sop(
     feedback=None,
     model=None,
 ):
-    """Generate an SOP revision draft using the Gemini API.
-    `model` overrides GEMINI_MODEL (used by the benchmark to compare models)."""
-
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise RuntimeError(
-            "GEMINI_API_KEY is not configured. Add it to the project's .env file."
-        )
-
-    model = model or os.getenv("GEMINI_MODEL")
-    if not model:
-        raise RuntimeError(
-            "GEMINI_MODEL is not configured. Add a model ID available to your API key "
-            "to the project's .env file."
-        )
-
+    """Generate an SOP revision draft through src/llm_client.py (Gemini by default).
+    `model` overrides the primary provider's model (used by the benchmark to compare models)."""
     prompt = build_sop_prompt(
         original_text=original_text,
         change_request=change_request,
@@ -204,50 +205,19 @@ def generate_sop(
     except ValueError:
         raise RuntimeError("GEMINI_TEMPERATURE in .env must be a number, e.g. 0.2.") from None
 
-    client = genai.Client(
-        api_key=api_key,
-        http_options=types.HttpOptions(
-            timeout=120_000,  # milliseconds
-            # The SDK retries rate limits (429) and server errors with exponential backoff.
-            retry_options=types.HttpRetryOptions(attempts=4, http_status_codes=RETRY_STATUS_CODES),
-        ),
-    )
-    response = client.models.generate_content(
-        model=model,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            temperature=temperature,
-            response_mime_type="application/json",
-            response_schema=SopDraft,
-        ),
-    )
-
-    parsed = response.parsed
-    if not isinstance(parsed, SopDraft) or not any(
-            step.change_type != "removed" and step.text.strip() for step in parsed.steps) and not any(
-            warning.text.strip() for warning in parsed.warnings):
-        # Usually a response cut off mid-JSON (e.g. finish reason MAX_TOKENS) or blocked.
-        # Never save a JSON fragment as a draft: fail the generation so no version is created.
-        candidates = getattr(response, "candidates", None) or []
-        reason = getattr(candidates[0], "finish_reason", None) if candidates else None
-        raise RuntimeError(
-            "Gemini did not return a complete structured draft"
-            + (f" (finish reason: {getattr(reason, 'name', reason)})" if reason else "")
-            + ". No version was saved; try again or shorten the source."
-        )
-    structured_draft = parsed.model_dump()
-    generated_text = render_draft_text(structured_draft)
-    structured = True
-
-    usage = getattr(response, "usage_metadata", None)
-
+    result = llm_client.generate(prompt, SopDraft, temperature=temperature, model=model,
+                                 validate=check_complete_draft)
+    structured_draft = result["parsed"].model_dump()
     return {
-        "text": generated_text,
-        "model": model,
+        "text": render_draft_text(structured_draft),
+        "model": result["model"],
+        "provider": result["provider"],
+        "fallback_used": result["fallback_used"],
+        "fallback_reason": result["fallback_reason"],
         "prompt_version": PROMPT_VERSION,
         "temperature": temperature,
-        "structured_output": structured,
+        "structured_output": True,
         "structured": structured_draft,
-        "input_tokens": getattr(usage, "prompt_token_count", None),
-        "output_tokens": getattr(usage, "candidates_token_count", None),
+        "input_tokens": result["input_tokens"],
+        "output_tokens": result["output_tokens"],
     }

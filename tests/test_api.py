@@ -608,3 +608,16 @@ def test_finding_feedback_export_makes_benchmark_rows(client, tmp_path):
     assert rows[0]["finding_type"] == version["safety_evaluation"]["findings"][0]["type"]
     assert rows[0]["evaluator_version"] and rows[0]["source_sha256"] == original_hash(doc_id)
     assert summary["labelled_findings"] == 2 and summary["disputed"] == 1
+
+
+def test_provider_and_fallback_are_recorded_per_version(client, monkeypatch):
+    monkeypatch.setattr(api, "generate_sop", lambda **kwargs: {
+        "text": "DRAFT:\nx", "model": "llama-local", "provider": "ollama", "fallback_used": True,
+        "fallback_reason": "gemini failed: RuntimeError: 503"})
+    doc_id = upload_two_page_pdf(client)
+    version = generate(client, doc_id, description="x").json()
+    assert (version["provider"], version["fallback_used"]) == ("ollama", True)
+    stored = client.get(f"/api/versions/{version['version_id']}").json()
+    assert (stored["provider"], stored["fallback_used"], stored["fallback_reason"]) == ("ollama", 1, "gemini failed: RuntimeError: 503")
+    event = client.get("/api/audit", headers=client.admin).json()["events"][0]
+    assert event["payload"]["fallback_used"] is True

@@ -148,10 +148,15 @@ def generate_version(document_id, description, scope, target_page, parent_versio
                 result.get("structured_output"),
                 json.dumps(result["structured"]) if result.get("structured") else None,
                 created_by,
+                result.get("provider"),
+                int(bool(result.get("fallback_used"))),
+                result.get("fallback_reason"),
             ),
             audit={"user": created_by, "version_id": version_id, "payload": {
                 "document_id": document_id, "request_id": request_id, "parent_version_id": parent_version_id or None,
                 "model": result.get("model"), "prompt_version": result.get("prompt_version"),
+                "provider": result.get("provider"), "fallback_used": bool(result.get("fallback_used")),
+                "fallback_reason": result.get("fallback_reason"),
                 "content_sha256": hashlib.sha256(generated_text.encode("utf-8")).hexdigest(),
             }},
         )
@@ -185,6 +190,9 @@ def generate_version(document_id, description, scope, target_page, parent_versio
         "structured_output": result.get("structured_output"),
         "structured": result.get("structured"),
         "created_by": created_by,
+        "provider": result.get("provider"),
+        "fallback_used": bool(result.get("fallback_used")),
+        "fallback_reason": result.get("fallback_reason"),
         "input_tokens": result.get("input_tokens"),
         "output_tokens": result.get("output_tokens"),
         "created_at": created_version,
@@ -213,8 +221,8 @@ def insert_numbered_version(document_id, values, audit, attempts=3):
                     (id, document_id, request_id, content, created_at, source_document_id,
                      parent_version_id, target_page, model, prompt_version, input_tokens,
                      output_tokens, temperature, structured_output, structured_json, created_by,
-                     version_number, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')
+                     provider, fallback_used, fallback_reason, version_number, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')
                 """,
                 (*values, next_version),
             )

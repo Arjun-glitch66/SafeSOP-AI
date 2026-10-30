@@ -32,6 +32,10 @@ VERSION_COLUMNS = {
     "structured_output": "INTEGER",
     # Prompt v3+: the model's JSON (steps/warnings citing source ids). NULL for older versions.
     "structured_json": "TEXT",
+    # Which LLM produced the draft, and whether the fallback provider had to step in (and why).
+    "provider": "TEXT",
+    "fallback_used": "INTEGER",
+    "fallback_reason": "TEXT",
     # Username of whoever generated the version (NULL before sign-in existed).
     "created_by": "TEXT",
 }
