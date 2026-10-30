@@ -58,8 +58,9 @@ def submit(prepared):
                VALUES (?, 'generate', ?, ?, 'queued', 'queued', ?, ?)""",
             (job_id, prepared["document_id"], prepared["created_by"], created, created),
         )
+    job = get_job(job_id)  # as accepted; read before the worker can move it on
     executor().submit(_run, job_id, prepared)
-    return get_job(job_id)
+    return job
 
 
 def _run(job_id, prepared):
