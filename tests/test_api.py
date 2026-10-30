@@ -233,3 +233,19 @@ def test_oversized_source_is_refused_before_calling_gemini(client, monkeypatch):
     response = generate(client, doc_id, description="x", scope="page", target_page=1)
     assert response.status_code == 413 and "characters" in response.json()["detail"]
     assert len(client.prompts) == 1  # only the allowed page-scope call reached the model
+
+
+def test_approved_version_is_locked(client):
+    doc_id = upload_two_page_pdf(client)
+    v1 = generate(client, doc_id, description="a").json()
+    url = f"/api/versions/{v1['version_id']}/reviews"
+
+    assert client.post(url, data={"decision": "needs_revision", "reviewer": "Arjun"}).status_code == 200
+    assert client.post(url, data={"decision": "approved", "reviewer": "Arjun",
+                                  "feedback": "Checked by hand."}).status_code == 200
+    for decision in ("approved", "rejected", "needs_revision"):
+        response = client.post(url, data={"decision": decision, "reviewer": "Other", "feedback": "x"})
+        assert response.status_code == 409 and "locked" in response.json()["detail"]
+
+    assert client.get(f"/api/versions/{v1['version_id']}").json()["status"] == "approved"
+    assert [r["decision"] for r in client.get(url).json()["reviews"]] == ["approved", "needs_revision"]

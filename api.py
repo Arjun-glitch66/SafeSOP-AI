@@ -104,7 +104,11 @@ DOCUMENT_COLUMNS = {
     "page_count": "INTEGER",
 }
 
+# Version states: draft -> needs_revision | approved | rejected. Approved versions are
+# locked; any further review is refused with 409. Changes go into a new version.
 REVIEW_DECISIONS = {"approved", "rejected", "needs_revision"}
+LOCKED_STATUSES = ("approved",)
+LOCKED_DETAIL = "This version is approved and locked. Generate a new version to make changes."
 
 
 def init_db():
@@ -926,10 +930,13 @@ def create_review(
     review_id = str(uuid.uuid4())
     created = now()
     with connect_db() as connection:
-        if not connection.execute(
-            "SELECT id FROM versions WHERE id = ?", (version_id,)
-        ).fetchone():
+        version = connection.execute(
+            "SELECT status FROM versions WHERE id = ?", (version_id,)
+        ).fetchone()
+        if not version:
             raise HTTPException(status_code=404, detail="Version not found.")
+        if version["status"] in LOCKED_STATUSES:
+            raise HTTPException(status_code=409, detail=LOCKED_DETAIL)
 
         latest = connection.execute(
             "SELECT status FROM evaluations WHERE version_id = ? ORDER BY created_at DESC LIMIT 1",
@@ -944,6 +951,15 @@ def create_review(
                        "written justification in the review comments.",
             )
 
+        # Conditional update: if a concurrent review locked the version since the read
+        # above, nothing changes and this review is refused (the `with` block rolls back).
+        changed = connection.execute(
+            f"UPDATE versions SET status = ? WHERE id = ? "
+            f"AND status NOT IN ({', '.join('?' * len(LOCKED_STATUSES))})",
+            (decision, version_id, *LOCKED_STATUSES),
+        ).rowcount
+        if not changed:
+            raise HTTPException(status_code=409, detail=LOCKED_DETAIL)
         connection.execute(
             """
             INSERT INTO review_history
@@ -951,10 +967,6 @@ def create_review(
             VALUES (?, ?, ?, ?, ?, ?)
             """,
             (review_id, version_id, decision, reviewer, feedback, created),
-        )
-        connection.execute(
-            "UPDATE versions SET status = ? WHERE id = ?",
-            (decision, version_id),
         )
 
     return {
