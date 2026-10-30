@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app import config
 from app.auth import current_user, seed_admin
 from app.db import init_db
-from app.routers import auth, documents, health, requests, reviews, versions
+from app.routers import audit, auth, documents, health, requests, reviews, versions
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("safesop")
@@ -40,5 +40,5 @@ app.add_middleware(
 app.include_router(health.router)  # public: liveness and evaluator status
 app.include_router(auth.router)    # login is public; the rest checks roles itself
 # Everything else needs a signed-in user; write endpoints add a role check of their own.
-for module in (documents, requests, versions, reviews):
+for module in (documents, requests, versions, reviews, audit):
     app.include_router(module.router, dependencies=[Depends(current_user)])

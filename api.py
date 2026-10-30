@@ -8,13 +8,13 @@ the code actually uses.
 import sys
 import types
 
-from app import auth, config, db, main, schemas
+from app import audit, auth, config, db, main, schemas
 from app.routers import documents, health, requests, reviews, versions
 from app.routers import auth as auth_router
 from app.services import evaluation, generation, pdf
 
 # Search order. Each name the tests touch is defined in exactly one of these modules.
-_MODULES = (config, db, schemas, auth, generation, evaluation, pdf,
+_MODULES = (config, db, schemas, audit, auth, generation, evaluation, pdf,
             documents, requests, versions, reviews, health, auth_router, main)
 
 

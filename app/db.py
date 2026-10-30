@@ -46,6 +46,14 @@ CHANGE_REQUEST_COLUMNS = {
     "target_page": "INTEGER",
 }
 
+# What an approval signed: the checks it was shown, the original PDF and the exact draft text.
+REVIEW_COLUMNS = {
+    "evaluator_version": "TEXT",
+    "evaluation_status": "TEXT",
+    "source_sha256": "TEXT",
+    "content_sha256": "TEXT",
+}
+
 
 def init_db():
     with connect_db() as connection:
@@ -101,6 +109,25 @@ def init_db():
                 FOREIGN KEY(version_id) REFERENCES versions(id)
             );
 
+            CREATE TABLE IF NOT EXISTS audit_events (
+                seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                id TEXT NOT NULL UNIQUE,
+                ts TEXT NOT NULL,
+                user TEXT NOT NULL,
+                action TEXT NOT NULL,
+                entity TEXT NOT NULL,
+                entity_id TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                prev_hash TEXT NOT NULL UNIQUE,
+                hash TEXT NOT NULL UNIQUE
+            );
+
+            -- Append-only: the database itself refuses to change or remove audit events.
+            CREATE TRIGGER IF NOT EXISTS audit_events_no_update BEFORE UPDATE ON audit_events
+            BEGIN SELECT RAISE(ABORT, 'audit_events is append-only'); END;
+            CREATE TRIGGER IF NOT EXISTS audit_events_no_delete BEFORE DELETE ON audit_events
+            BEGIN SELECT RAISE(ABORT, 'audit_events is append-only'); END;
+
             CREATE TABLE IF NOT EXISTS users (
                 id TEXT PRIMARY KEY,
                 username TEXT NOT NULL UNIQUE,
@@ -123,7 +150,7 @@ def init_db():
 
         missing = []
         for table, wanted in (("documents", DOCUMENT_COLUMNS), ("versions", VERSION_COLUMNS),
-                              ("change_requests", CHANGE_REQUEST_COLUMNS)):
+                              ("change_requests", CHANGE_REQUEST_COLUMNS), ("review_history", REVIEW_COLUMNS)):
             existing = {row["name"] for row in connection.execute(f"PRAGMA table_info({table})")}
             missing += [(table, name, sql) for name, sql in wanted.items() if name not in existing]
 

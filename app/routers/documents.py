@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 from app import config
+from app.audit import append_audit
 from app.auth import require_role
 from app.db import connect_db, now
 
@@ -80,6 +81,7 @@ async def upload_document(file: UploadFile = File(...), user=Depends(require_rol
         file_hash = digest.hexdigest()
 
         with connect_db() as connection:
+            connection.execute("BEGIN IMMEDIATE")  # audit chain head is read in this transaction
             connection.execute(
                 """
                 INSERT INTO documents
@@ -96,6 +98,8 @@ async def upload_document(file: UploadFile = File(...), user=Depends(require_rol
                     page_count,
                 ),
             )
+            append_audit(connection, user["username"], "document_uploaded", "document", document_id,
+                         {"filename": filename, "sha256": file_hash, "size_bytes": size, "page_count": page_count})
 
         logger.info("Uploaded PDF %s (%s bytes)", filename, size)
         return {

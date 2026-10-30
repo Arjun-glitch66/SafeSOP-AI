@@ -1,4 +1,5 @@
 """Draft generation: always from the unchanged original PDF, numbered atomically."""
+import hashlib
 import json
 import logging
 import sqlite3
@@ -8,6 +9,7 @@ from pathlib import Path
 from fastapi import HTTPException
 
 from app import config
+from app.audit import append_audit
 from app.db import connect_db, now
 from app.services.evaluation import run_and_save_evaluation
 from app.services.pdf import extract_document_text
@@ -136,6 +138,11 @@ def generate_version(document_id, description, scope, target_page, parent_versio
                 json.dumps(result["structured"]) if result.get("structured") else None,
                 created_by,
             ),
+            audit={"user": created_by, "version_id": version_id, "payload": {
+                "document_id": document_id, "request_id": request_id, "parent_version_id": parent_version_id or None,
+                "model": result.get("model"), "prompt_version": result.get("prompt_version"),
+                "content_sha256": hashlib.sha256(generated_text.encode("utf-8")).hexdigest(),
+            }},
         )
     except Exception as exc:
         logger.exception("Could not save generated version")
@@ -174,7 +181,7 @@ def generate_version(document_id, description, scope, target_page, parent_versio
     }
 
 
-def insert_numbered_version(document_id, values, attempts=3):
+def insert_numbered_version(document_id, values, audit, attempts=3):
     """Insert a version as MAX(version_number) + 1 and return that number.
 
     BEGIN IMMEDIATE takes SQLite's write lock before the MAX() read, so concurrent
@@ -200,6 +207,8 @@ def insert_numbered_version(document_id, values, attempts=3):
                 """,
                 (*values, next_version),
             )
+            append_audit(connection, audit["user"], "version_generated", "version", audit["version_id"],
+                         {**audit["payload"], "version_number": next_version})
             connection.commit()
             return next_version
         except sqlite3.IntegrityError as exc:

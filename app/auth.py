@@ -15,6 +15,7 @@ from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app import config
+from app.audit import append_audit
 from app.db import connect_db, now
 
 logger = logging.getLogger("safesop")
@@ -38,7 +39,7 @@ def check_password(password, password_hash):
     return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("ascii"))
 
 
-def create_user(username, password, role):
+def create_user(username, password, role, created_by):
     username = username.strip()
     if role not in ROLES:
         raise HTTPException(status_code=400, detail=f"Role must be one of: {', '.join(ROLES)}.")
@@ -46,13 +47,16 @@ def create_user(username, password, role):
         raise HTTPException(status_code=400,
                             detail=f"Enter a username and a password of at least {config.MIN_PASSWORD_LENGTH} characters.")
     user = {"id": str(uuid.uuid4()), "username": username, "role": role}
+    password_hash = hash_password(password)
     with connect_db() as connection:
+        connection.execute("BEGIN IMMEDIATE")
         if connection.execute("SELECT 1 FROM users WHERE username = ?", (username,)).fetchone():
             raise HTTPException(status_code=409, detail="That username is taken.")
         connection.execute(
             "INSERT INTO users (id, username, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?)",
-            (user["id"], username, hash_password(password), role, now()),
+            (user["id"], username, password_hash, role, now()),
         )
+        append_audit(connection, created_by, "user_created", "user", user["id"], {"username": username, "role": role})
     return user
 
 
@@ -69,8 +73,14 @@ def seed_admin():
     with connect_db() as connection:
         exists = connection.execute("SELECT 1 FROM users WHERE username = ?", (username,)).fetchone()
     if not exists:
-        create_user(username, password, "admin")
+        create_user(username, password, "admin", created_by="system")
         logger.info("Created admin user %s from ADMIN_USERNAME", username)
+
+
+def password_hash_of(user_id):
+    with connect_db() as connection:
+        row = connection.execute("SELECT password_hash FROM users WHERE id = ?", (user_id,)).fetchone()
+    return row["password_hash"] if row else None
 
 
 def authenticate(username, password):

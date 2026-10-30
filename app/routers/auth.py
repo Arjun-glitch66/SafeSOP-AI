@@ -22,8 +22,8 @@ def me(user=Depends(current_user)):
 
 
 @router.post("/api/users")
-def add_user(body: NewUser, _admin=Depends(require_role("admin"))):
-    return create_user(body.username, body.password, body.role)
+def add_user(body: NewUser, admin=Depends(require_role("admin"))):
+    return create_user(body.username, body.password, body.role, created_by=admin["username"])
 
 
 @router.get("/api/users")

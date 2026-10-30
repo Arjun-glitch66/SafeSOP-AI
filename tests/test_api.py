@@ -197,8 +197,10 @@ def test_approval_needs_justification_when_checks_did_not_pass(client):
     v1 = generate(client, doc_id, description="a").json()  # stub draft fails the checks
     url = f"/api/versions/{v1['version_id']}/reviews"
 
-    assert client.post(url, data={"decision": "approved"}, headers=client.reviewer).status_code == 400
-    ok = client.post(url, data={"decision": "approved", "feedback": "Checked by hand: warning moved to step 1."},
+    assert client.post(url, data={"decision": "approved", "password": PASSWORD},
+                       headers=client.reviewer).status_code == 400
+    ok = client.post(url, data={"decision": "approved", "feedback": "Checked by hand: warning moved to step 1.",
+                                "password": PASSWORD},
                      headers=client.reviewer)
     assert ok.status_code == 200 and ok.json()["reviewer"] == "rita"
     assert client.get(f"/api/versions/{v1['version_id']}").json()["status"] == "approved"
@@ -222,6 +224,8 @@ def test_concurrent_generations_get_distinct_version_numbers(client, monkeypatch
     with ThreadPoolExecutor(workers) as pool:
         numbers = list(pool.map(run, range(workers)))
     assert sorted(numbers) == list(range(1, workers + 1))
+    report = client.get("/api/audit/verify").json()  # concurrent writers did not fork the audit chain
+    assert report["ok"] and report["events"] == 4 + 1 + workers
 
 
 def test_text_inputs_have_length_limits(client):
@@ -258,10 +262,11 @@ def test_approved_version_is_locked(client):
     url = f"/api/versions/{v1['version_id']}/reviews"
 
     assert client.post(url, data={"decision": "needs_revision"}, headers=client.reviewer).status_code == 200
-    assert client.post(url, data={"decision": "approved", "feedback": "Checked by hand."},
+    assert client.post(url, data={"decision": "approved", "feedback": "Checked by hand.", "password": PASSWORD},
                        headers=client.reviewer).status_code == 200
     for decision in ("approved", "rejected", "needs_revision"):
-        response = client.post(url, data={"decision": decision, "feedback": "x"}, headers=sign_in(client, "rob"))
+        response = client.post(url, data={"decision": decision, "feedback": "x", "password": PASSWORD},
+                               headers=sign_in(client, "rob"))
         assert response.status_code == 409 and "locked" in response.json()["detail"]
 
     assert client.get(f"/api/versions/{v1['version_id']}").json()["status"] == "approved"
@@ -439,8 +444,8 @@ def test_nobody_approves_a_version_they_generated(client):
                            headers=client.admin)  # admin may author and review, but not both on one version
     version = response.json()
     url = f"/api/versions/{version['version_id']}/reviews"
-    approve = {"decision": "approved", "feedback": "Checked by hand."}
-    denied = client.post(url, data=approve, headers=client.admin)
+    approve = {"decision": "approved", "feedback": "Checked by hand.", "password": PASSWORD}
+    denied = client.post(url, data={**approve, "password": ADMIN_PASSWORD}, headers=client.admin)
     assert denied.status_code == 403 and "another reviewer" in denied.json()["detail"]
     assert client.post(url, data={"decision": "needs_revision"}, headers=client.admin).status_code == 200
     assert client.post(url, data=approve, headers=client.reviewer).status_code == 200
@@ -463,3 +468,72 @@ def test_admin_seed_never_resets_an_existing_password(client, monkeypatch):
     monkeypatch.setattr(api, "ADMIN_PASSWORD", "a-different-password")
     api.seed_admin()
     assert client.post("/api/auth/login", json={"username": "admin", "password": ADMIN_PASSWORD}).status_code == 200
+
+
+
+# --- 2.5 audit log and e-signature ---
+
+def audit_events(client):
+    return list(reversed(client.get("/api/audit", headers=client.admin).json()["events"]))
+
+
+def test_audited_actions_form_a_verifiable_chain(client):
+    doc_id = upload_two_page_pdf(client)
+    version = generate(client, doc_id, description="a").json()
+    client.post(f"/api/versions/{version['version_id']}/reviews", data={"decision": "rejected", "feedback": "no"},
+                headers=client.reviewer)
+    events = audit_events(client)
+    assert [e["action"] for e in events] == ["user_created"] * 4 + ["document_uploaded", "version_generated",
+                                                                    "version_rejected"]
+    assert (events[0]["user"], events[4]["user"], events[6]["user"]) == ("system", "alice", "rita")
+    assert events[4]["payload"]["sha256"] == original_hash(doc_id)
+    assert all(e["prev_hash"] == previous["hash"] for previous, e in zip(events, events[1:]))
+    assert client.get("/api/audit/verify").json() == {"ok": True, "events": 7, "broken_at": None,
+                                                      "head": events[-1]["hash"]}
+    assert client.get("/api/audit").status_code == 403  # the event list is admin-only
+
+
+def test_approval_is_an_e_signature(client):
+    doc_id = upload_two_page_pdf(client)
+    version = generate(client, doc_id, description="a").json()
+    url = f"/api/versions/{version['version_id']}/reviews"
+    approve = {"decision": "approved", "feedback": "Checked by hand."}
+    for password in ("", "wrong-password-1"):
+        response = client.post(url, data={**approve, "password": password}, headers=client.reviewer)
+        assert response.status_code == 403 and "password" in response.json()["detail"]
+    signed = client.post(url, data={**approve, "password": PASSWORD}, headers=client.reviewer).json()
+
+    content = client.get(f"/api/versions/{version['version_id']}/content").json()["content"]
+    expected = {"evaluator_version": version["safety_evaluation"]["evaluator_version"],
+                "evaluation_status": "fail", "source_sha256": original_hash(doc_id),
+                "content_sha256": hashlib.sha256(content.encode()).hexdigest()}
+    assert {k: signed[k] for k in expected} == expected
+    assert {k: client.get(url).json()["reviews"][0][k] for k in expected} == expected
+    event = audit_events(client)[-1]
+    assert event["action"] == "version_approved" and event["payload"]["password_reentered"] is True
+    assert {k: event["payload"][k] for k in expected} == expected
+
+
+def test_audit_log_is_append_only_and_tampering_is_detected(client):
+    import sqlite3
+    upload_two_page_pdf(client)
+    upload_two_page_pdf(client)
+    with sqlite3.connect(api.DB_PATH) as connection:
+        for statement in ("UPDATE audit_events SET user = 'mallory'", "DELETE FROM audit_events"):
+            with pytest.raises(sqlite3.DatabaseError, match="append-only"):
+                connection.execute(statement)
+
+    # Someone with the database file drops the triggers and edits one event...
+    with sqlite3.connect(api.DB_PATH) as connection:
+        connection.execute("DROP TRIGGER audit_events_no_update")
+        connection.execute("UPDATE audit_events SET payload_json = '{\"filename\":\"other.pdf\"}' WHERE seq = 5")
+    report = client.get("/api/audit/verify").json()
+    assert (report["ok"], report["broken_at"]) == (False, 5) and "changed" in report["reason"]
+
+    # ...or removes one entirely.
+    with sqlite3.connect(api.DB_PATH) as connection:
+        connection.execute("DROP TRIGGER audit_events_no_delete")
+        connection.execute("UPDATE audit_events SET payload_json = (SELECT payload_json FROM audit_events WHERE seq = 6) WHERE seq = 5")
+        connection.execute("DELETE FROM audit_events WHERE seq = 5")
+    report = client.get("/api/audit/verify").json()
+    assert (report["ok"], report["broken_at"]) == (False, 6) and "removed" in report["reason"]
