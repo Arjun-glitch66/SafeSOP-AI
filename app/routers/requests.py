@@ -1,9 +1,10 @@
 """Change requests, saved before or during generation."""
 import uuid
 
-from fastapi import APIRouter, Form, HTTPException
+from fastapi import APIRouter, Depends, Form, HTTPException
 
 from app import config
+from app.auth import require_role
 from app.db import connect_db, now
 
 router = APIRouter()
@@ -15,6 +16,7 @@ def create_change_request(
     description: str = Form(..., max_length=config.MAX_DESCRIPTION_CHARS),
     scope: str = Form("full"),
     target_page: int | None = Form(None),
+    user=Depends(require_role("author")),
 ):
     description = description.strip()
     scope = scope.strip().lower()

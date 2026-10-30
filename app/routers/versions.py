@@ -2,10 +2,11 @@
 import difflib
 import json
 
-from fastapi import APIRouter, Form, HTTPException
+from fastapi import APIRouter, Depends, Form, HTTPException
 from fastapi.responses import Response
 
 from app import config
+from app.auth import require_role
 from app.db import connect_db
 from app.services.evaluation import load_version_source, run_and_save_evaluation
 from app.services.generation import generate_version
@@ -23,6 +24,7 @@ def generate_revision(
     target_page: int | None = Form(None),
     parent_version_id: str | None = Form(None),
     request_id: str | None = Form(None),
+    user=Depends(require_role("author")),
 ):
     """
     Generate and save an AI draft. This is not safety approval.
@@ -31,7 +33,8 @@ def generate_revision(
     With request_id, the saved change request supplies the description, scope and
     target page (submitted values for those are ignored) and is linked to the draft.
     """
-    return generate_version(document_id, description, scope, target_page, parent_version_id, request_id)
+    return generate_version(document_id, description, scope, target_page, parent_version_id, request_id,
+                            created_by=user["username"])
 
 
 @router.post("/api/versions/{version_id}/evaluate")

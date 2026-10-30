@@ -1,9 +1,10 @@
 """Human review decisions: the only way a version's status changes."""
 import uuid
 
-from fastapi import APIRouter, Form, HTTPException
+from fastapi import APIRouter, Depends, Form, HTTPException
 
 from app import config
+from app.auth import require_role
 from app.db import connect_db, now
 from app.schemas import LOCKED_DETAIL, LOCKED_STATUSES, REVIEW_DECISIONS
 
@@ -14,29 +15,31 @@ router = APIRouter()
 def create_review(
     version_id: str,
     decision: str = Form(...),
-    reviewer: str = Form("", max_length=config.MAX_REVIEWER_CHARS),
     feedback: str = Form("", max_length=config.MAX_FEEDBACK_CHARS),
+    user=Depends(require_role("reviewer")),
 ):
-    """Record a human review decision. Only this endpoint changes a version's status."""
+    """Record a human review decision. Only this endpoint changes a version's status.
+    The reviewer is the signed-in user, never a typed name."""
     decision = decision.strip().lower()
-    reviewer = reviewer.strip()
+    reviewer = user["username"]
     feedback = feedback.strip()
     if decision not in REVIEW_DECISIONS:
         raise HTTPException(
             status_code=400,
             detail=f"Decision must be one of: {', '.join(sorted(REVIEW_DECISIONS))}.",
         )
-    if not reviewer:
-        raise HTTPException(status_code=400, detail="Enter the reviewer's name.")
 
     review_id = str(uuid.uuid4())
     created = now()
     with connect_db() as connection:
         version = connection.execute(
-            "SELECT status FROM versions WHERE id = ?", (version_id,)
+            "SELECT status, created_by FROM versions WHERE id = ?", (version_id,)
         ).fetchone()
         if not version:
             raise HTTPException(status_code=404, detail="Version not found.")
+        if decision == "approved" and version["created_by"] == reviewer:
+            # Separation of duties: whoever generated a draft cannot also approve it.
+            raise HTTPException(status_code=403, detail="You generated this version, so another reviewer must approve it.")
         if version["status"] in LOCKED_STATUSES:
             raise HTTPException(status_code=409, detail=LOCKED_DETAIL)
 

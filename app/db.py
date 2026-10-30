@@ -32,6 +32,8 @@ VERSION_COLUMNS = {
     "structured_output": "INTEGER",
     # Prompt v3+: the model's JSON (steps/warnings citing source ids). NULL for older versions.
     "structured_json": "TEXT",
+    # Username of whoever generated the version (NULL before sign-in existed).
+    "created_by": "TEXT",
 }
 
 
@@ -97,6 +99,14 @@ def init_db():
                 evaluator_version TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY(version_id) REFERENCES versions(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS users (
+                id TEXT PRIMARY KEY,
+                username TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL,
+                created_at TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS review_history (

@@ -25,9 +25,29 @@ def client(tmp_path, monkeypatch):
                 "prompt_version": "test", "input_tokens": 10, "output_tokens": 5}
 
     monkeypatch.setattr(api, "generate_sop", fake_generate_sop)
+    monkeypatch.setattr(api, "BCRYPT_ROUNDS", 4)  # fast hashing in tests only
+    monkeypatch.setattr(api, "ADMIN_USERNAME", "admin")
+    monkeypatch.setattr(api, "ADMIN_PASSWORD", ADMIN_PASSWORD)
     with TestClient(api.app) as test_client:
         test_client.prompts = prompts
+        test_client.admin = sign_in(test_client, "admin", ADMIN_PASSWORD)
+        for name, role in (("alice", "author"), ("rita", "reviewer"), ("rob", "reviewer")):
+            created = test_client.post("/api/users", json={"username": name, "password": PASSWORD, "role": role},
+                                       headers=test_client.admin)
+            assert created.status_code == 200, created.text
+        test_client.reviewer = sign_in(test_client, "rita")
+        test_client.headers.update(sign_in(test_client, "alice"))  # requests default to the author
         yield test_client
+
+
+ADMIN_PASSWORD = "admin-password-123"
+PASSWORD = "correct-horse-battery"
+
+
+def sign_in(client, username, password=PASSWORD):
+    response = client.post("/api/auth/login", json={"username": username, "password": password})
+    assert response.status_code == 200, response.text
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
 def upload_two_page_pdf(client):
@@ -132,10 +152,11 @@ def test_review_decision_changes_only_that_version(client):
     v2 = generate(client, doc_id, description="b").json()
 
     url = f"/api/versions/{v1['version_id']}/reviews"
-    assert client.post(url, data={"decision": "lgtm"}).status_code == 400
-    assert client.post(url, data={"decision": "needs_revision", "reviewer": "Arjun",
-                                  "feedback": "check torque"}).status_code == 200
-    assert client.get(url).json()["reviews"][0]["feedback"] == "check torque"
+    assert client.post(url, data={"decision": "lgtm"}, headers=client.reviewer).status_code == 400
+    assert client.post(url, data={"decision": "needs_revision", "feedback": "check torque"},
+                       headers=client.reviewer).status_code == 200
+    review = client.get(url).json()["reviews"][0]
+    assert (review["feedback"], review["reviewer"]) == ("check torque", "rita")
 
     statuses = {v["id"]: v["status"] for v in client.get(f"/api/documents/{doc_id}/versions").json()["versions"]}
     assert statuses == {v1["version_id"]: "needs_revision", v2["version_id"]: "draft"}
@@ -171,16 +192,15 @@ def test_document_details_include_page_count_but_not_server_path(client):
     assert details["page_count"] == 2 and "stored_path" not in details
 
 
-def test_approval_needs_reviewer_and_justification_when_checks_did_not_pass(client):
+def test_approval_needs_justification_when_checks_did_not_pass(client):
     doc_id = upload_two_page_pdf(client)
     v1 = generate(client, doc_id, description="a").json()  # stub draft fails the checks
     url = f"/api/versions/{v1['version_id']}/reviews"
 
-    assert client.post(url, data={"decision": "approved"}).status_code == 400  # no reviewer
-    assert client.post(url, data={"decision": "approved", "reviewer": "Arjun"}).status_code == 400
-    ok = client.post(url, data={"decision": "approved", "reviewer": "Arjun",
-                                "feedback": "Checked by hand: warning moved to step 1."})
-    assert ok.status_code == 200
+    assert client.post(url, data={"decision": "approved"}, headers=client.reviewer).status_code == 400
+    ok = client.post(url, data={"decision": "approved", "feedback": "Checked by hand: warning moved to step 1."},
+                     headers=client.reviewer)
+    assert ok.status_code == 200 and ok.json()["reviewer"] == "rita"
     assert client.get(f"/api/versions/{v1['version_id']}").json()["status"] == "approved"
 
 
@@ -196,7 +216,8 @@ def test_concurrent_generations_get_distinct_version_numbers(client, monkeypatch
     monkeypatch.setattr(api, "generate_sop", slow_generate_sop)
 
     def run(index):
-        return api.generate_revision(doc_id, f"change {index}", "full", None, None, None)["version_number"]
+        author = {"id": "u1", "username": "alice", "role": "author"}
+        return api.generate_revision(doc_id, f"change {index}", "full", None, None, None, author)["version_number"]
 
     with ThreadPoolExecutor(workers) as pool:
         numbers = list(pool.map(run, range(workers)))
@@ -211,10 +232,8 @@ def test_text_inputs_have_length_limits(client):
     assert client.prompts == []
 
     url = f"/api/versions/{generate(client, doc_id, description='a').json()['version_id']}/reviews"
-    long_reviewer = {"decision": "rejected", "reviewer": "r" * (api.MAX_REVIEWER_CHARS + 1)}
-    long_feedback = {"decision": "rejected", "reviewer": "Arjun", "feedback": "f" * (api.MAX_FEEDBACK_CHARS + 1)}
-    assert client.post(url, data=long_reviewer).status_code == 422
-    assert client.post(url, data=long_feedback).status_code == 422
+    long_feedback = {"decision": "rejected", "feedback": "f" * (api.MAX_FEEDBACK_CHARS + 1)}
+    assert client.post(url, data=long_feedback, headers=client.reviewer).status_code == 422
     assert client.get(url).json()["reviews"] == []
 
 
@@ -238,11 +257,11 @@ def test_approved_version_is_locked(client):
     v1 = generate(client, doc_id, description="a").json()
     url = f"/api/versions/{v1['version_id']}/reviews"
 
-    assert client.post(url, data={"decision": "needs_revision", "reviewer": "Arjun"}).status_code == 200
-    assert client.post(url, data={"decision": "approved", "reviewer": "Arjun",
-                                  "feedback": "Checked by hand."}).status_code == 200
+    assert client.post(url, data={"decision": "needs_revision"}, headers=client.reviewer).status_code == 200
+    assert client.post(url, data={"decision": "approved", "feedback": "Checked by hand."},
+                       headers=client.reviewer).status_code == 200
     for decision in ("approved", "rejected", "needs_revision"):
-        response = client.post(url, data={"decision": decision, "reviewer": "Other", "feedback": "x"})
+        response = client.post(url, data={"decision": decision, "feedback": "x"}, headers=sign_in(client, "rob"))
         assert response.status_code == 409 and "locked" in response.json()["detail"]
 
     assert client.get(f"/api/versions/{v1['version_id']}").json()["status"] == "approved"
@@ -368,3 +387,79 @@ def test_v3_versions_use_the_structured_evaluator_and_old_ones_the_text_path(cli
     monkeypatch.setattr(api, "generate_sop", lambda **kwargs: {"text": "DRAFT:\nx", "model": "stub-model"})
     old = generate(client, doc_id, description="y").json()
     assert "+structured" not in old["safety_evaluation"]["evaluator_version"]
+
+
+
+# --- 2.4 authentication and roles ---
+
+def test_everything_but_health_and_login_needs_a_signed_in_user(client):
+    anonymous = {"Authorization": ""}
+    assert client.get("/api/health", headers=anonymous).status_code == 200
+    for method, url in (("get", "/api/documents"), ("post", "/api/documents/upload"),
+                        ("get", "/api/documents/x/versions"), ("post", "/api/documents/x/generate"),
+                        ("get", "/api/versions/x/diff"), ("post", "/api/versions/x/reviews"),
+                        ("get", "/api/versions/x/download"), ("get", "/api/auth/me"), ("get", "/api/users")):
+        assert getattr(client, method)(url, headers=anonymous).status_code == 401, url
+    assert client.get("/api/documents", headers={"Authorization": "Bearer not-a-token"}).status_code == 401
+
+
+def test_login_rejects_wrong_password_and_reports_the_user(client):
+    assert client.post("/api/auth/login", json={"username": "alice", "password": "wrong-password"}).status_code == 401
+    assert client.post("/api/auth/login", json={"username": "nobody", "password": PASSWORD}).status_code == 401
+    me = client.get("/api/auth/me").json()
+    assert (me["username"], me["role"]) == ("alice", "author") and "password_hash" not in me
+
+
+def test_expired_and_foreign_tokens_are_rejected(client, monkeypatch):
+    import jwt
+    forged = jwt.encode({"sub": "anything"}, "some-other-secret-that-is-long-enough-for-hs256", algorithm="HS256")
+    assert client.get("/api/documents", headers={"Authorization": f"Bearer {forged}"}).status_code == 401
+    monkeypatch.setattr(api, "TOKEN_MINUTES", -1)
+    expired = sign_in(client, "alice")
+    assert client.get("/api/documents", headers=expired).status_code == 401
+
+
+def test_roles_gate_writes(client):
+    doc_id = upload_two_page_pdf(client)  # as the author
+    reviewer = client.reviewer
+    pdf = ("x.pdf", b"%PDF-1.4", "application/pdf")
+    assert client.post("/api/documents/upload", files={"file": pdf}, headers=reviewer).status_code == 403
+    assert client.post(f"/api/documents/{doc_id}/generate", data={"description": "x"}, headers=reviewer).status_code == 403
+    assert client.post(f"/api/documents/{doc_id}/requests", data={"description": "x"}, headers=reviewer).status_code == 403
+    version = generate(client, doc_id, description="a").json()
+    assert version["created_by"] == "alice"
+    url = f"/api/versions/{version['version_id']}/reviews"
+    assert client.post(url, data={"decision": "rejected"}).status_code == 403  # author cannot review
+    assert client.get(f"/api/documents/{doc_id}/versions", headers=reviewer).status_code == 200  # reading is open
+
+
+def test_nobody_approves_a_version_they_generated(client):
+    doc_id = upload_two_page_pdf(client)
+    response = client.post(f"/api/documents/{doc_id}/generate", data={"scope": "full", "description": "a"},
+                           headers=client.admin)  # admin may author and review, but not both on one version
+    version = response.json()
+    url = f"/api/versions/{version['version_id']}/reviews"
+    approve = {"decision": "approved", "feedback": "Checked by hand."}
+    denied = client.post(url, data=approve, headers=client.admin)
+    assert denied.status_code == 403 and "another reviewer" in denied.json()["detail"]
+    assert client.post(url, data={"decision": "needs_revision"}, headers=client.admin).status_code == 200
+    assert client.post(url, data=approve, headers=client.reviewer).status_code == 200
+
+
+def test_user_management_is_admin_only(client):
+    new = {"username": "carol", "password": PASSWORD, "role": "reviewer"}
+    assert client.post("/api/users", json=new).status_code == 403  # author
+    assert client.post("/api/users", json=new, headers=client.admin).status_code == 200
+    assert client.post("/api/users", json=new, headers=client.admin).status_code == 409
+    assert client.post("/api/users", json={**new, "username": "dan", "password": "short"},
+                       headers=client.admin).status_code == 400
+    assert client.post("/api/users", json={**new, "username": "eve", "role": "owner"},
+                       headers=client.admin).status_code == 400
+    names = [u["username"] for u in client.get("/api/users", headers=client.admin).json()["users"]]
+    assert names == ["admin", "alice", "carol", "rita", "rob"]
+
+
+def test_admin_seed_never_resets_an_existing_password(client, monkeypatch):
+    monkeypatch.setattr(api, "ADMIN_PASSWORD", "a-different-password")
+    api.seed_admin()
+    assert client.post("/api/auth/login", json={"username": "admin", "password": ADMIN_PASSWORD}).status_code == 200

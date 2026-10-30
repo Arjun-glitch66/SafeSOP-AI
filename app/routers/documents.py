@@ -5,10 +5,11 @@ import uuid
 from pathlib import Path
 
 import pymupdf
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 from app import config
+from app.auth import require_role
 from app.db import connect_db, now
 
 logger = logging.getLogger("safesop")
@@ -31,7 +32,7 @@ def list_documents():
 
 
 @router.post("/api/documents/upload")
-async def upload_document(file: UploadFile = File(...)):
+async def upload_document(file: UploadFile = File(...), user=Depends(require_role("author"))):
     filename = Path(file.filename or "").name.strip()
 
     if not filename:

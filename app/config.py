@@ -18,7 +18,16 @@ MAX_PDF_PAGES = 50
 MAX_SOURCE_CHARS = 60_000
 MAX_DESCRIPTION_CHARS = 2000
 MAX_FEEDBACK_CHARS = 2000
-MAX_REVIEWER_CHARS = 100
+
+# Authentication. JWT_SECRET must be set in production (any long random string); without it
+# a random per-process secret is used and every login ends when the API restarts.
+JWT_SECRET = os.getenv("JWT_SECRET", "")
+TOKEN_MINUTES = int(os.getenv("TOKEN_MINUTES", "480"))  # one working day
+BCRYPT_ROUNDS = 12
+MIN_PASSWORD_LENGTH = 10
+# Seeded once at startup if no user with this name exists.
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 
 DEFAULT_ALLOWED_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"
 
