@@ -1,12 +1,36 @@
 // Set VITE_API_BASE in frontend/.env.local to point at a different backend.
 const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
+const TOKEN_KEY = "safesop.token";
 
-async function request(path, options = {}) {
-  const response = await fetch(`${API_BASE}${path}`, options);
+// Storage can be blocked (private mode, policies); signing in then lasts until the tab closes.
+let memoryToken = null;
+export function getToken() {
+  try { return localStorage.getItem(TOKEN_KEY) ?? memoryToken; } catch { return memoryToken; }
+}
+export function setToken(token) {
+  memoryToken = token;
+  try {
+    if (token) localStorage.setItem(TOKEN_KEY, token);
+    else localStorage.removeItem(TOKEN_KEY);
+  } catch { /* memory only */ }
+}
+
+// Called on any 401 from a signed-in request (expired or revoked session). Set by AuthProvider.
+let onUnauthorized = () => {};
+export function setUnauthorizedHandler(handler) { onUnauthorized = handler; }
+
+async function send(path, { auth = true, ...options } = {}) {
+  const headers = { ...options.headers };
+  const token = getToken();
+  if (auth && token) headers.Authorization = `Bearer ${token}`;
+  const response = await fetch(`${API_BASE}${path}`, { ...options, headers });
 
   if (!response.ok) {
+    if (response.status === 401 && auth) {
+      setToken(null);
+      onUnauthorized();
+    }
     let message = `Request failed (${response.status})`;
-
     try {
       const error = await response.json();
       // FastAPI validation errors (422) arrive as a list of {loc, msg}.
@@ -16,139 +40,88 @@ async function request(path, options = {}) {
     } catch {
       // Keep the default error message.
     }
-
-    throw new Error(message);
+    const error = new Error(message);
+    error.status = response.status;
+    throw error;
   }
-
-  return response.json();
+  return response;
 }
 
-export async function checkBackend() {
-  return request("/api/health");
+async function request(path, options) {
+  return (await send(path, options)).json();
 }
 
-export async function getDocuments() {
-  const result = await request("/api/documents");
-  return result.documents;
+function form(fields) {
+  const data = new FormData();
+  for (const [key, value] of Object.entries(fields)) {
+    if (value !== undefined && value !== null) data.append(key, value);
+  }
+  return data;
 }
 
-export async function uploadDocument(file) {
-  const formData = new FormData();
-  formData.append("file", file);
+const id = encodeURIComponent;
 
-  return request("/api/documents/upload", {
-    method: "POST",
-    body: formData,
+// ---- auth ----
+export async function login(username, password) {
+  const result = await request("/api/auth/login", {
+    auth: false, method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
   });
+  setToken(result.access_token);
+  return result.user;
 }
+export const getMe = () => request("/api/auth/me");
 
-export async function getDocumentVersions(documentId) {
-  const result = await request(
-    `/api/documents/${encodeURIComponent(documentId)}/versions`
-  );
+// ---- backend status ----
+export const checkBackend = () => request("/api/health", { auth: false });
+export const getEvaluationStatus = () => request("/api/evaluation/status", { auth: false });
 
-  return result.versions;
-}
+// ---- documents ----
+export const getDocuments = async () => (await request("/api/documents")).documents;
+export const getDocument = (documentId) => request(`/api/documents/${id(documentId)}`);
+export const uploadDocument = (file) => request("/api/documents/upload", { method: "POST", body: form({ file }) });
+export const getDocumentVersions = async (documentId) =>
+  (await request(`/api/documents/${id(documentId)}/versions`)).versions;
 
-export async function createChangeRequest(
-  documentId,
-  description,
-  scope = "full",
-  targetPage = null
-) {
-  const formData = new FormData();
-  formData.append("description", description);
-  formData.append("scope", scope);
-  if (scope === "page") formData.append("target_page", targetPage);
-
-  return request(
-    `/api/documents/${encodeURIComponent(documentId)}/requests`,
-    {
-      method: "POST",
-      body: formData,
-    }
-  );
-}
+export const createChangeRequest = (documentId, description, scope = "full", targetPage = null) =>
+  request(`/api/documents/${id(documentId)}/requests`, {
+    method: "POST", body: form({ description, scope, target_page: scope === "page" ? targetPage : null }),
+  });
 
 // With requestId, the backend takes description, scope and page from that saved request.
-export async function generateRevision(documentId, description, scope = "full", targetPage = null, parentVersionId = null, requestId = null) {
-  const formData = new FormData();
-  if (requestId) {
-    formData.append("request_id", requestId);
-  } else {
-    formData.append("description", description);
-    formData.append("scope", scope);
-    if (scope === "page") formData.append("target_page", targetPage);
-  }
-  if (parentVersionId) formData.append("parent_version_id", parentVersionId);
-
-  return request(
-    `/api/documents/${encodeURIComponent(documentId)}/generate`,
-    {
-      method: "POST",
-      body: formData,
-    }
-  );
-}
-
-export async function getVersionContent(versionId) {
-  const result = await request(
-    `/api/versions/${encodeURIComponent(versionId)}/content`
-  );
-
-  return result.content;
-}
-
-export function versionDownloadUrl(versionId, format = "txt") {
-  return `${API_BASE}/api/versions/${encodeURIComponent(versionId)}/download?format=${format}`;
-}
-
-export async function getVersionDiff(versionId) {
-  return request(`/api/versions/${encodeURIComponent(versionId)}/diff`);
-}
-
-export async function getEvaluationStatus() {
-  return request("/api/evaluation/status");
-}
-
-export async function getDocument(documentId) {
-  return request(`/api/documents/${encodeURIComponent(documentId)}`);
-}
-
-export async function getEvaluations(versionId) {
-  const result = await request(
-    `/api/versions/${encodeURIComponent(versionId)}/evaluations`
-  );
-
-  return result.evaluations;
-}
-
-export async function runEvaluation(versionId) {
-  return request(`/api/versions/${encodeURIComponent(versionId)}/evaluate`, {
-    method: "POST",
+// `signal` (AbortController) lets the user stop waiting for a long generation.
+export function generateRevision(documentId, { description, scope = "full", targetPage = null, parentVersionId = null, requestId = null, signal } = {}) {
+  const fields = requestId
+    ? { request_id: requestId }
+    : { description, scope, target_page: scope === "page" ? targetPage : null };
+  return request(`/api/documents/${id(documentId)}/generate`, {
+    method: "POST", signal, body: form({ ...fields, parent_version_id: parentVersionId }),
   });
 }
 
-export async function getReviews(versionId) {
-  const result = await request(
-    `/api/versions/${encodeURIComponent(versionId)}/reviews`
-  );
+// ---- versions ----
+export const getVersion = (versionId) => request(`/api/versions/${id(versionId)}`);
+export const getVersionContent = async (versionId) => (await request(`/api/versions/${id(versionId)}/content`)).content;
+export const getVersionDiff = (versionId) => request(`/api/versions/${id(versionId)}/diff`);
+export const getEvaluations = async (versionId) => (await request(`/api/versions/${id(versionId)}/evaluations`)).evaluations;
+export const runEvaluation = (versionId) => request(`/api/versions/${id(versionId)}/evaluate`, { method: "POST" });
+export const getReviews = async (versionId) => (await request(`/api/versions/${id(versionId)}/reviews`)).reviews;
 
-  return result.reviews;
+// Approval needs the reviewer's password again (electronic signature).
+export const createReview = (versionId, { decision, feedback = "", password }) =>
+  request(`/api/versions/${id(versionId)}/reviews`, { method: "POST", body: form({ decision, feedback, password }) });
+
+// Files need the auth header too, so they are fetched and saved instead of linked.
+async function saveFile(path, filename) {
+  const blob = await (await send(path)).blob();
+  const url = URL.createObjectURL(blob);
+  const link = Object.assign(document.createElement("a"), { href: url, download: filename });
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
-
-export async function createReview(versionId, decision, reviewer, feedback) {
-  const formData = new FormData();
-  formData.append("decision", decision);
-  formData.append("reviewer", reviewer);
-  formData.append("feedback", feedback);
-
-  return request(`/api/versions/${encodeURIComponent(versionId)}/reviews`, {
-    method: "POST",
-    body: formData,
-  });
-}
-
-export function originalDownloadUrl(documentId) {
-  return `${API_BASE}/api/documents/${encodeURIComponent(documentId)}/original`;
-}
+export const downloadVersion = (versionId, versionNumber, format = "txt") =>
+  saveFile(`/api/versions/${id(versionId)}/download?format=${format}`, `SafeSOP-v${versionNumber}.${format}`);
+export const downloadOriginal = (documentId, filename) =>
+  saveFile(`/api/documents/${id(documentId)}/original`, filename);

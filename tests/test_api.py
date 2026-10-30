@@ -537,3 +537,17 @@ def test_audit_log_is_append_only_and_tampering_is_detected(client):
         connection.execute("DELETE FROM audit_events WHERE seq = 5")
     report = client.get("/api/audit/verify").json()
     assert (report["ok"], report["broken_at"]) == (False, 6) and "removed" in report["reason"]
+
+
+def test_findings_carry_line_and_page_numbers_that_match_the_diff(client):
+    doc_id = upload_two_page_pdf(client)
+    version = generate(client, doc_id, description="use torque 20Nm").json()
+    [missing] = [f for f in version["safety_evaluation"]["findings"] if f["type"] == "missing_warning"]
+    assert (missing["source_line"], missing["source_page"]) == (2, 1)  # line 1 is the [PAGE 1] marker
+
+    diff = client.get(f"/api/versions/{version['version_id']}/diff").json()
+    lines = {block["original_start"] + i: text for block in diff["blocks"] for i, text in enumerate(block["original"])}
+    assert lines[missing["source_line"]] == missing["source"]
+
+    page_two = generate(client, doc_id, description="add gloves", scope="page", target_page=2).json()
+    assert all(f["source_page"] in (2, None) for f in page_two["safety_evaluation"]["findings"])

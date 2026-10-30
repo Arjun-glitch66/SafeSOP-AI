@@ -726,6 +726,10 @@ def evaluate_revision(original_text, generated_text, change_request=""):
         "change_applied": not any(f["type"] == "change_not_applied" for f in findings) if change_request.strip() else None,
     }
 
+    for finding in findings:  # line numbers let the UI jump from a finding to the comparison
+        finding.setdefault("source_line", line_number(original_lines, finding.get("source")))
+        finding.setdefault("draft_line", line_number(draft_lines, finding.get("draft")))
+
     severities = {f["severity"] for f in findings}
     status = ("fail" if severities & FAILING_SEVERITIES
               else "needs_review" if "review" in severities else "pass_automated")

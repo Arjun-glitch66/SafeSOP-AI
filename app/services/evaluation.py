@@ -1,19 +1,37 @@
 """Running and storing the automated checks for a version."""
 import json
 import logging
+import re
 import uuid
 
 from fastapi import HTTPException
 
 from app.db import connect_db, now
 from app.services.pdf import extract_document_text
-from src.safety_evaluator import evaluate_revision, evaluate_structured_revision
+from src.safety_evaluator import evaluate_revision, evaluate_structured_revision, text_lines
 from src.semantic_checker import apply_semantic_check
 
 logger = logging.getLogger("safesop")
+PAGE_MARKER = re.compile(r"\[PAGE (\d+)\]")
 
 
-def run_and_save_evaluation(version_id, original_text, generated_text, change_request, structured=None):
+def add_source_pages(findings, original_text, target_page=None):
+    """The original PDF page of each finding's source line: the target page for page-scoped
+    versions, else the nearest '[PAGE n]' marker that extract_document_text() put above it."""
+    page_of_line, page = [], target_page
+    for line in text_lines(original_text):
+        marker = PAGE_MARKER.fullmatch(line)
+        if marker and target_page is None:
+            page = int(marker.group(1))
+        page_of_line.append(page)
+    for finding in findings:
+        line = finding.get("source_line")
+        finding["source_page"] = page_of_line[line - 1] if line and line <= len(page_of_line) else None
+    return findings
+
+
+def run_and_save_evaluation(version_id, original_text, generated_text, change_request, structured=None,
+                            target_page=None):
     """Run the automated checks and store them. An evaluator crash must not lose the saved draft.
     Prompt-v3 drafts (with structured JSON) are matched by source id; older ones by text."""
     evaluation_id = str(uuid.uuid4())
@@ -25,6 +43,7 @@ def run_and_save_evaluation(version_id, original_text, generated_text, change_re
             evaluation = evaluate_revision(original_text, generated_text, change_request)
         # Off unless SEMANTIC_CHECK=nli|llm. Advisory: may add findings / raise status, never lower it.
         evaluation = apply_semantic_check(evaluation, original_text, generated_text)
+        add_source_pages(evaluation["findings"], original_text, target_page)
         with connect_db() as connection:
             connection.execute(
                 """

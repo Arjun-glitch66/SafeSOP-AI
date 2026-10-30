@@ -1,8 +1,10 @@
-import { AlertTriangle, FileSearch, FlaskConical, ShieldAlert, Workflow } from "lucide-react";
+import { AlertTriangle, Crosshair, FileSearch, FlaskConical, ShieldAlert, Workflow } from "lucide-react";
 import { Badge, MetricCard } from "./ui.jsx";
 import { evaluationLabel, percent, severityTone } from "./labels.js";
 
-export default function EvaluationReport({ evaluation }) {
+// onShowInComparison(finding): jump to the line a finding quotes. renderActions(finding, index):
+// extra per-finding controls (e.g. reviewer feedback on the finding).
+export default function EvaluationReport({ evaluation, onShowInComparison, renderActions }) {
   if (!evaluation) return null;
   if (evaluation.status === "error" || !evaluation.metrics) {
     return <div className="notice-banner"><ShieldAlert size={20} /><div><strong>Automated evaluation did not run</strong><p>{evaluation.message}</p></div></div>;
@@ -23,11 +25,15 @@ export default function EvaluationReport({ evaluation }) {
           <div className="row-main">
             <strong>{finding.type.replaceAll("_", " ")}{finding.advisory ? " (advisory, model-based)" : ""}</strong>
             <span>{finding.detail}</span>
-            {finding.source && <span>Source{finding.source_line ? ` (line ${finding.source_line})` : ""}: <span className="quote">“{finding.source}”</span></span>}
+            {finding.source && <span>Source{finding.source_line ? ` (line ${finding.source_line}${finding.source_page ? `, PDF page ${finding.source_page}` : ""})` : ""}: <span className="quote">“{finding.source}”</span></span>}
             {finding.draft && <span>Draft{finding.draft_line ? ` (line ${finding.draft_line})` : ""}: <span className="quote">“{finding.draft}”</span></span>}
             {finding.evidence && <span>Evidence: {finding.evidence}</span>}
             {finding.values && <span>Values: {finding.values.join(", ")}</span>}
             {finding.pairs && <span>{finding.pairs.length} step pair(s) out of order, e.g. “{finding.pairs[0].before}” should come before “{finding.pairs[0].after}”</span>}
+            <div className="finding-actions">
+              {onShowInComparison && (finding.draft_line || finding.source_line) && <button className="text-button" onClick={() => onShowInComparison(finding)}><Crosshair size={14} /> Show in comparison</button>}
+              {renderActions?.(finding, index)}
+            </div>
           </div>
           <Badge tone={severityTone[finding.severity]}>{finding.severity}</Badge>
         </div>

@@ -8,7 +8,8 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parents[1]  # repository root
 load_dotenv(BASE_DIR / ".env")
 
-DATA_DIR = BASE_DIR / "data"
+# SAFESOP_DATA_DIR moves the database and stored PDFs (e.g. a throwaway folder for demos).
+DATA_DIR = Path(os.getenv("SAFESOP_DATA_DIR") or BASE_DIR / "data")
 UPLOAD_DIR = DATA_DIR / "originals"
 DB_PATH = DATA_DIR / "safesop.db"
 BACKUP_DIR = DATA_DIR / "backups"

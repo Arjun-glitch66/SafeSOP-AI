@@ -1,0 +1,51 @@
+import { Link, useNavigate, useParams } from "react-router";
+import { ArrowDownToLine, ClipboardCheck, FileText, RefreshCw } from "lucide-react";
+import { downloadVersion, getReviews, getVersion } from "../api.js";
+import ReviewTimeline from "../components/ReviewTimeline.jsx";
+import VersionEvidence from "../components/VersionEvidence.jsx";
+import { Badge, EmptyState } from "../components/ui.jsx";
+import { evaluationLabel, evaluationTone, statusLabel, statusTone } from "../components/labels.js";
+import { useAuth, useNotice, useResource, useTitle } from "../state.jsx";
+
+export default function VersionPage() {
+  const { versionId } = useParams();
+  const version = useResource(() => getVersion(versionId), [versionId]);
+  const reviews = useResource(() => getReviews(versionId), [versionId]);
+  const v = version.data;
+  useTitle(v ? `Version ${v.version_number} · ${v.filename}` : "Version");
+  const { can } = useAuth();
+  const { show } = useNotice();
+  const navigate = useNavigate();
+
+  if (version.error) return <EmptyState icon={FileText} title="Version not available" text={version.error.message} action={<Link className="btn btn-primary" to="/documents">Back to documents</Link>} />;
+  if (!v) return <p className="small-note">Loading version…</p>;
+
+  const download = (format) => downloadVersion(v.id, v.version_number, format).catch((error) => show(`Download failed: ${error.message}`, "error"));
+
+  return (
+    <>
+      <div className="page-intro">
+        <div>
+          <p className="title-block-kicker"><Link to={`/documents/${v.document_id}`}>{v.filename}</Link></p>
+          <h1>Version {v.version_number}</h1>
+          <p>{v.change_request || "No change request recorded."}</p>
+          <p className="small-note">Generated from the original PDF{v.scope === "page" && v.target_page ? `, page ${v.target_page}` : ""} by {v.created_by || "unknown"} on {new Date(v.created_at).toLocaleString()} · {v.model || "model not recorded"}{v.prompt_version ? ` · prompt ${v.prompt_version}` : ""}</p>
+        </div>
+        <div className="stack-badges">
+          <Badge tone={evaluationTone[v.evaluation_status] || "gray"}>{evaluationLabel[v.evaluation_status] || "Not run"}</Badge>
+          <Badge tone={statusTone(v.status)} dot>{statusLabel(v.status)}</Badge>
+        </div>
+      </div>
+
+      <div className="action-row page-actions">
+        {can("reviewer") && v.status !== "approved" && <Link className="btn btn-primary" to={`/versions/${v.id}/review`}><ClipboardCheck size={16} /> Review this version</Link>}
+        <button className="btn btn-secondary" onClick={() => download("pdf")}><ArrowDownToLine size={16} /> Draft (PDF)</button>
+        <button className="btn btn-secondary" onClick={() => download("txt")}><ArrowDownToLine size={16} /> Text (.txt)</button>
+        {can("author") && <button className="btn btn-secondary" onClick={() => navigate(`/documents/${v.document_id}`, { state: { parent: v } })}><RefreshCw size={16} /> Regenerate from original</button>}
+      </div>
+
+      <VersionEvidence versionId={v.id} onEvaluated={version.reload} />
+      <ReviewTimeline reviews={reviews} status={v.status} />
+    </>
+  );
+}

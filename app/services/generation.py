@@ -153,7 +153,7 @@ def generate_version(document_id, description, scope, target_page, parent_versio
         ) from exc
 
     evaluation = run_and_save_evaluation(version_id, original_text, generated_text, description,
-                                         result.get("structured"))
+                                         result.get("structured"), resolved_page)
 
     return {
         "id": version_id,

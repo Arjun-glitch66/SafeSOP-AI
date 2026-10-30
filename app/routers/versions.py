@@ -42,7 +42,8 @@ def evaluate_version(version_id: str):
     """Re-run the automated checks, e.g. for versions created before the evaluator existed."""
     row, original_text = load_version_source(version_id)
     structured = json.loads(row["structured_json"]) if row["structured_json"] else None
-    return run_and_save_evaluation(version_id, original_text, row["content"], row["description"] or "", structured)
+    return run_and_save_evaluation(version_id, original_text, row["content"], row["description"] or "", structured,
+                                   row["target_page"])
 
 
 @router.get("/api/versions/{version_id}/diff")
@@ -56,7 +57,9 @@ def diff_version(version_id: str):
     blocks = []
     matcher = difflib.SequenceMatcher(a=original_lines, b=draft_lines, autojunk=False)
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-        blocks.append({"tag": tag, "original": original_lines[i1:i2], "draft": draft_lines[j1:j2]})
+        # *_start: 1-based line number of the block's first line, the numbering findings use.
+        blocks.append({"tag": tag, "original": original_lines[i1:i2], "draft": draft_lines[j1:j2],
+                       "original_start": i1 + 1, "draft_start": j1 + 1})
     return {
         "version_id": version_id,
         "blocks": blocks,
@@ -120,7 +123,15 @@ def list_versions(document_id: str):
 def get_version(version_id: str):
     with connect_db() as connection:
         row = connection.execute(
-            "SELECT * FROM versions WHERE id = ?",
+            """
+            SELECT v.*, cr.description AS change_request, cr.scope, d.filename,
+                   (SELECT e.status FROM evaluations e WHERE e.version_id = v.id
+                    ORDER BY e.created_at DESC LIMIT 1) AS evaluation_status
+            FROM versions v
+            JOIN documents d ON d.id = v.document_id
+            LEFT JOIN change_requests cr ON cr.id = v.request_id
+            WHERE v.id = ?
+            """,
             (version_id,),
         ).fetchone()
     if not row:
