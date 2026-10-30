@@ -30,6 +30,8 @@ VERSION_COLUMNS = {
     "output_tokens": "INTEGER",
     "temperature": "REAL",
     "structured_output": "INTEGER",
+    # Prompt v3+: the model's JSON (steps/warnings citing source ids). NULL for older versions.
+    "structured_json": "TEXT",
 }
 
 

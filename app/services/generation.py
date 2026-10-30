@@ -1,4 +1,5 @@
 """Draft generation: always from the unchanged original PDF, numbered atomically."""
+import json
 import logging
 import sqlite3
 import uuid
@@ -132,6 +133,7 @@ def generate_version(document_id, description, scope, target_page, parent_versio
                 result.get("output_tokens"),
                 result.get("temperature"),
                 result.get("structured_output"),
+                json.dumps(result["structured"]) if result.get("structured") else None,
             ),
         )
     except Exception as exc:
@@ -161,6 +163,7 @@ def generate_version(document_id, description, scope, target_page, parent_versio
         "prompt_version": result.get("prompt_version"),
         "temperature": result.get("temperature"),
         "structured_output": result.get("structured_output"),
+        "structured": result.get("structured"),
         "input_tokens": result.get("input_tokens"),
         "output_tokens": result.get("output_tokens"),
         "created_at": created_version,
@@ -188,8 +191,8 @@ def insert_numbered_version(document_id, values, attempts=3):
                 INSERT INTO versions
                     (id, document_id, request_id, content, created_at, source_document_id,
                      parent_version_id, target_page, model, prompt_version, input_tokens,
-                     output_tokens, temperature, structured_output, version_number, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')
+                     output_tokens, temperature, structured_output, structured_json, version_number, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')
                 """,
                 (*values, next_version),
             )

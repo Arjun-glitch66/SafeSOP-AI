@@ -332,3 +332,21 @@ def test_advisory_semantic_findings_are_saved_but_never_lower_status(client, mon
     assert advisory and advisory[0]["type"] == "semantic_contradiction"
     assert evaluation["metrics"]["semantic_check"]["status"] == "ran"
     assert evaluation["status"] == "needs_review"  # never pass_automated once an advisory finding exists
+
+
+def test_structured_draft_json_is_stored_with_the_version(client, monkeypatch):
+    import json
+    structured = {"preamble": "", "steps": [{"id": "R1", "text": "Open the cover.", "source_step_ids": ["S1"],
+                                             "change_type": "unchanged"}],
+                  "warnings": [], "removed_warning_ids": []}
+    monkeypatch.setattr(api, "generate_sop", lambda **kwargs: {
+        "text": "DRAFT:\n1. Open the cover.", "model": "stub-model", "prompt_version": "v3", "structured": structured})
+    doc_id = upload_two_page_pdf(client)
+    version = generate(client, doc_id, description="x").json()
+    assert version["structured"] == structured
+    stored = client.get(f"/api/versions/{version['version_id']}").json()["structured_json"]
+    assert json.loads(stored) == structured
+
+    monkeypatch.setattr(api, "generate_sop", lambda **kwargs: {"text": "DRAFT:\n1. x", "model": "stub-model"})
+    older_style = generate(client, doc_id, description="y").json()
+    assert client.get(f"/api/versions/{older_style['version_id']}").json()["structured_json"] is None
