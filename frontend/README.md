@@ -22,10 +22,11 @@ The backend only accepts requests from origins listed in its `ALLOWED_ORIGINS` s
 
 | Path | Purpose |
 |------|---------|
-| `src/App.jsx` | Shell, navigation and all shared state, passed to pages as one `app` object |
-| `src/api.js` | Every backend call |
-| `src/pages/` | One component per view: Overview, Documents, Revision Studio, Safety & Quality, Version History |
-| `src/components/` | Diff view, evaluation report, small UI pieces, status labels |
+| `src/App.jsx` | Routes; everything except `/login` requires a signed-in user |
+| `src/state.jsx` | `useAuth`, `useNotice`, `useBackend` (health polling) and `useResource` (data loading) |
+| `src/api.js` | Every backend call; stores the token, sends it, and returns to sign-in on any 401 |
+| `src/pages/` | One component per route: Login, Documents, Document, Version, Review, Checks |
+| `src/components/` | Layout, diff view, evaluation report, version evidence, sign-off dialog, review timeline, UI pieces |
 | `src/index.css` | All styles (plain CSS with design tokens on `:root`) |
 
 ## Wording rules

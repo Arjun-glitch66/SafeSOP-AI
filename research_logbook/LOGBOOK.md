@@ -164,3 +164,16 @@ Engineering only; no experiment was run and the evaluator (`safe-sop-eval-1.1`) 
 - **Advisory semantic check:** `src/semantic_checker.py`, NLI cross-encoder or Anthropic LLM judge, behind `SEMANTIC_CHECK` (default off, off in CI). Adds advisory findings only, raises at most to `needs_review`, never lowers a status. Tested with fakes only; not evaluated.
 - **Not measured yet:** any real-model accuracy of v1.2, κ, the semantic checker's precision/recall.
 - **Tests:** 47 → 74.
+
+## Entry 10 — Phase 2: structure, structured output, sign-in, audit trail, review UI (2026-10-30)
+
+Engineering; no experiment was run. The text evaluator's output on EXP-001c is unchanged (status accuracy 0.938).
+
+- **Refactor:** `api.py` split into the `app/` package (routers, services, db, config, schemas) by moving function bodies verbatim. All 74 tests passed without changes before the commit, and the OpenAPI paths, parameters, bodies and responses were identical. `api.py` is a shim that forwards attribute reads, writes and deletes to the owning module, so `monkeypatch.setattr(api, ...)` still works.
+- **Prompt v3:** source warnings and steps are numbered (W1…, S1…) in the prompt; the model returns steps `{id, text, source_step_ids, change_type}` and warnings `{id, text, source_warning_id}` plus `removed_warning_ids`. The JSON is stored in `versions.structured_json`; the plain draft is rendered from it. **Not yet run against the real Gemini API** (no API calls in this phase): whether Gemini fills the ids reliably is unmeasured.
+- **Structured evaluator:** `evaluate_structured_revision()` (`safe-sop-eval-1.2+structured`) matches by cited id. A declared warning removal is critical; a step labelled `unchanged` is still compared with its source; every kept step, including added ones, is checked against every prohibition. 11 unit tests. Its accuracy on EXP-001c is not measured, because the test set has no structured drafts.
+- **Sign-in and roles:** bcrypt + JWT; author / reviewer / admin; nobody approves a version they generated; the reviewer is the signed-in user.
+- **Audit trail:** append-only (SQLite triggers), hash-chained `audit_events`, written in the same transaction as each upload, generation, review and user creation; `/api/audit/verify`; tamper tests for an edited and a deleted event, and an 8-thread concurrency test with no chain fork. Approval requires password re-entry and records evaluator version, source PDF SHA-256 and draft SHA-256.
+- **Frontend:** sign-in, react-router routes, state split into providers and hooks, findings jump to the cited diff line, evidence-first review page with a sign-off dialog, cancellable generation. Checked in a headless browser against a throwaway database with a stubbed generator.
+- **Feedback loop:** parent-version review comments are passed to the model on regeneration; reviewers mark findings true problem / false alarm; `export_finding_feedback.py` produces labelled rows (precision only; recall still needs EXP-003).
+- **Tests:** 74 → 103.

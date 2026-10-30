@@ -43,3 +43,12 @@ Items the coding agent stopped on because they need a product, licence, cost or 
     `pip install anthropic` and an `ANTHROPIC_API_KEY`. Billed per evaluation, and it **sends the
     SOP warnings and draft steps to Anthropic**; check that this is allowed for your SOPs.
   - Neither backend has been evaluated. Run it on the EXP-003 labels before trusting it.
+
+## Phase 2
+
+- **2.4 Before anyone else uses it:** set `JWT_SECRET` (long random string) and
+  `ADMIN_USERNAME` / `ADMIN_PASSWORD` in `.env`, then create the author and reviewer accounts
+  (`POST /api/users` from `/docs`). Decide whether you need password reset, account lockout or
+  login rate limiting (not built; 3.4 only limits `/generate`).
+- **2.2 Run prompt v3 once against the real Gemini API** (a few billed calls) to check that it
+  fills `source_step_ids` / `source_warning_id` correctly. All tests use a stub.
