@@ -15,9 +15,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(api, "DB_PATH", tmp_path / "test.db")
     monkeypatch.setattr(api, "BACKUP_DIR", tmp_path / "backups")
     monkeypatch.setattr(api, "UPLOAD_DIR", tmp_path / "originals")
-    monkeypatch.setattr(api, "VERSION_DIR", tmp_path / "versions")
     (tmp_path / "originals").mkdir()
-    (tmp_path / "versions").mkdir()
 
     prompts = []
 

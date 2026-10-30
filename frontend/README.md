@@ -1,16 +1,34 @@
-# React + Vite
+# SafeSOP-AI frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+React 19 + Vite single-page app for the SafeSOP-AI revision workflow: upload an SOP PDF,
+describe a change, generate a draft with Gemini (via the FastAPI backend), inspect the
+automated safety-regression checks, compare the draft with the original, and record a
+human review decision.
 
-Currently, two official plugins are available:
+## Run
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+```bash
+npm ci
+npm run dev      # http://localhost:5173
+npm run build    # production build into dist/
+npm run lint     # oxlint
+```
 
-## React Compiler
+The backend must be running (see the repository README). By default the app calls
+`http://127.0.0.1:8000`; set `VITE_API_BASE` in `frontend/.env.local` to point elsewhere.
+The backend only accepts requests from origins listed in its `ALLOWED_ORIGINS` setting.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Layout
 
-## Expanding the Oxlint configuration
+| Path | Purpose |
+|------|---------|
+| `src/App.jsx` | Shell, navigation and all shared state, passed to pages as one `app` object |
+| `src/api.js` | Every backend call |
+| `src/pages/` | One component per view: Overview, Documents, Revision Studio, Safety & Quality, Version History |
+| `src/components/` | Diff view, evaluation report, small UI pieces, status labels |
+| `src/index.css` | All styles (plain CSS with design tokens on `:root`) |
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+## Wording rules
+
+The UI never calls a draft "safe". A draft with no findings is shown as "No rule fired", and
+every draft is labelled as not approved until a named reviewer approves it.

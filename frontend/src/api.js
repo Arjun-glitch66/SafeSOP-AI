@@ -152,11 +152,3 @@ export async function createReview(versionId, decision, reviewer, feedback) {
 export function originalDownloadUrl(documentId) {
   return `${API_BASE}/api/documents/${encodeURIComponent(documentId)}/original`;
 }
-
-export async function getChangeRequests(documentId) {
-  const result = await request(
-    `/api/documents/${encodeURIComponent(documentId)}/requests`
-  );
-
-  return result.requests;
-}

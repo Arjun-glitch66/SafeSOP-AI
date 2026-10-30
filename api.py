@@ -33,7 +33,6 @@ load_dotenv(BASE_DIR / ".env")
 
 DATA_DIR = BASE_DIR / "data"
 UPLOAD_DIR = DATA_DIR / "originals"
-VERSION_DIR = DATA_DIR / "versions"
 DB_PATH = DATA_DIR / "safesop.db"
 BACKUP_DIR = DATA_DIR / "backups"
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
@@ -47,7 +46,7 @@ MAX_REVIEWER_CHARS = 100
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("safesop")
 
-for folder in (DATA_DIR, UPLOAD_DIR, VERSION_DIR):
+for folder in (DATA_DIR, UPLOAD_DIR):
     folder.mkdir(parents=True, exist_ok=True)
 
 @asynccontextmanager
@@ -623,10 +622,8 @@ def generate_revision(
     generated_text = result["text"]
     version_id = str(uuid.uuid4())
     created_version = now()
-    version_file = VERSION_DIR / f"{version_id}.md"
 
     try:
-        version_file.write_text(generated_text, encoding="utf-8")
         next_version = insert_numbered_version(
             document_id,
             (
@@ -647,8 +644,6 @@ def generate_revision(
             ),
         )
     except Exception as exc:
-        if version_file.exists():
-            version_file.unlink()
         logger.exception("Could not save generated version")
         raise HTTPException(
             status_code=500,
