@@ -335,6 +335,14 @@ def extract_warnings(text):
     ]
 
 
+def number_source_items(original_text):
+    """Source warnings as W1..Wn and numbered steps as S1..Sn. Prompt v3 shows these ids to the
+    model, and evaluate_structured_revision() matches by them."""
+    warnings = [(f"W{n}", text) for n, text in enumerate(extract_warnings(original_text), start=1)]
+    steps = [(f"S{n}", step["text"]) for n, step in enumerate(extract_steps(original_text), start=1)]
+    return warnings, steps
+
+
 def best_match(target, candidates, score):
     best_index, best_score = None, 0.0
     for index, candidate in enumerate(candidates):
@@ -511,6 +519,27 @@ def check_change_applied(change_request, original_text, draft):
     }]
 
 
+def meaning_findings(source, draft_text, label, change_words):
+    """Polarity flips and opposite words (v1.1), then weakened quantifiers and changed actors
+    (v1.2), for one matched source/draft pair."""
+    findings = []
+    if has_negation(source) != has_negation(draft_text):
+        findings.append({"type": "conflicting_instruction", "severity": "critical",
+                         "detail": f"{label} polarity changed (negation added or removed).",
+                         "source": source, "draft": draft_text})
+    flips = antonym_flips(source, draft_text)
+    for old, new in flips:
+        requested = new in change_words
+        findings.append({"type": "conflicting_instruction", "severity": "review" if requested else "critical",
+                         "detail": f"{label} says '{new}' where the source says '{old}'."
+                                   + (" The change request mentions it; confirm." if requested else ""),
+                         "source": source, "draft": draft_text})
+    return findings + check_quantifier(source, draft_text, change_words, flips) + check_actor(source, draft_text, change_words)
+
+
+LOCATED_TYPES = {"quantifier_weakened", "actor_changed"}  # v1.2 types that carry line numbers in the text path
+
+
 def line_number(lines, text):
     """1-based number of the first line containing `text`, or None."""
     if text:
@@ -553,18 +582,11 @@ def evaluate_revision(original_text, generated_text, change_request=""):
     change_words = plain_words(change_request)
 
     def check_conflict(source, draft_text, label):
-        if has_negation(source) != has_negation(draft_text):
-            add("conflicting_instruction", "critical", f"{label} polarity changed (negation added or removed).",
-                source=source, draft=draft_text)
-        flips = antonym_flips(source, draft_text)
-        for old, new in flips:
-            requested = new in change_words
-            add("conflicting_instruction", "review" if requested else "critical",
-                f"{label} says '{new}' where the source says '{old}'."
-                + (" The change request mentions it; confirm." if requested else ""),
-                source=source, draft=draft_text)
-        for finding in check_quantifier(source, draft_text, change_words, flips) + check_actor(source, draft_text, change_words):
-            add_located(finding)
+        for finding in meaning_findings(source, draft_text, label, change_words):
+            if finding["type"] in LOCATED_TYPES:
+                add_located(finding)
+            else:
+                findings.append(finding)
 
     if not draft_found:
         add("draft_section_not_found", "review",
@@ -712,6 +734,218 @@ def evaluate_revision(original_text, generated_text, change_request=""):
     return {
         "status": status,
         "evaluator_version": EVALUATOR_VERSION,
+        "metrics": metrics,
+        "findings": findings,
+        "disclaimer": (
+            "Automated text checks only. 'pass_automated' means no rule fired; it is not "
+            "safety approval. A qualified human reviewer must approve before use."
+        ),
+    }
+
+
+STRUCTURED_SUFFIX = "+structured"
+
+
+def evaluate_structured_revision(original_text, generated_text, structured, change_request=""):
+    """
+    Checks for a prompt-v3 draft, which cites source ids (S1.., W1..) on every step and warning.
+    Matching uses those ids, not text similarity. The model's own labels are not trusted:
+    an "unchanged" step is still compared with its source, and a warning listed in
+    removed_warning_ids is a critical finding like any other lost warning.
+    Values, units, duplicates and change-applied are checked on the rendered draft text,
+    as in evaluate_revision(). Same statuses, same disclaimer: no result is a safety approval.
+    """
+    draft, _ = extract_draft_section(generated_text)
+    original_lines, draft_lines = text_lines(original_text), text_lines(draft)
+    source_warnings, source_steps = number_source_items(original_text)
+    warning_text, step_text = dict(source_warnings), dict(source_steps)
+    change_words, change_tokens = plain_words(change_request), tokens(change_request)
+    removed_ids = set(structured.get("removed_warning_ids") or [])
+    steps = [s for s in structured.get("steps") or []]
+    kept_steps = [s for s in steps if s.get("change_type") != "removed"]
+    warnings = structured.get("warnings") or []
+
+    findings = []
+
+    def add(finding, source_id=None, draft_id=None):
+        finding["source_id"], finding["draft_id"] = source_id, draft_id
+        finding["source_line"] = line_number(original_lines, finding.get("source"))
+        finding["draft_line"] = line_number(draft_lines, finding.get("draft"))
+        findings.append(finding)
+
+    def finding(kind, severity, detail, **extra):
+        return {"type": kind, "severity": severity, "detail": detail, **extra}
+
+    if not source_steps:
+        add(finding("no_source_steps_detected", "review",
+                    "No numbered steps found in the source, so step checks could not run."))
+    if not source_warnings:
+        add(finding("no_source_warnings_detected", "review",
+                    "No warning lines found in the source, so warning recall could not be measured."))
+
+    # References to ids the source does not have: the model's provenance cannot be checked.
+    cited = [(w.get("id"), w.get("source_warning_id")) for w in warnings if w.get("source_warning_id")]
+    cited += [(st.get("id"), sid) for st in steps for sid in st.get("source_step_ids") or []]
+    cited += [(None, wid) for wid in removed_ids]
+    for draft_id, source_id in cited:
+        if source_id not in warning_text and source_id not in step_text:
+            add(finding("invalid_source_reference", "review",
+                        f"The draft cites source item '{source_id}', which the source does not have."), source_id, draft_id)
+
+    # 1. Warnings: carried (by id), deliberately removed, or missing.
+    preserved = altered = 0
+    for warning_id, text in source_warnings:
+        carriers = [w for w in warnings if w.get("source_warning_id") == warning_id]
+        if not carriers:
+            if warning_id in removed_ids:
+                add(finding("warning_removed", "critical",
+                            "The draft removes this source warning. A qualified reviewer must confirm the "
+                            "hazard no longer exists.", source=text), warning_id)
+            else:
+                add(finding("missing_warning", "critical",
+                            "Source warning is neither carried nor declared removed.", source=text), warning_id)
+            continue
+        carrier = carriers[0]
+        score = containment(tokens(text), tokens(carrier["text"]))
+        if score >= MATCH_THRESHOLD:
+            preserved += 1
+        else:
+            altered += 1
+            add(finding("altered_warning", "review", "Warning wording changed; confirm the meaning is unchanged.",
+                        source=text, draft=carrier["text"], score=round(score, 2)), warning_id, carrier.get("id"))
+        for item in meaning_findings(text, carrier["text"], "Warning", change_words):
+            add(item, warning_id, carrier.get("id"))
+
+    # 2. Steps: every source step must be accounted for exactly where the model says it went.
+    positions = []  # (source id, draft index among kept steps)
+    matched_steps = altered_steps = 0
+    for step_id, text in source_steps:
+        holders = [st for st in steps if step_id in (st.get("source_step_ids") or [])]
+        if not holders:
+            add(finding("omitted_step", "critical", "Source step is not accounted for in the draft.",
+                        source=text), step_id)
+            continue
+        holder = holders[0]
+        if holder.get("change_type") == "removed":
+            requested = containment(tokens(text), change_tokens) >= PARTIAL_THRESHOLD
+            add(finding("omitted_step", "review" if requested else "critical",
+                        "Step removed; the change request appears to ask for this. Confirm." if requested
+                        else "The draft removes this step and the change request does not ask for it.",
+                        source=text), step_id, holder.get("id"))
+            continue
+        positions.append((step_id, kept_steps.index(holder)))
+        source_tokens, draft_tokens = tokens(text), tokens(holder["text"])
+        score = dice(source_tokens, draft_tokens)
+        if score >= MATCH_THRESHOLD:
+            matched_steps += 1
+        else:
+            altered_steps += 1
+            new_words = draft_tokens - source_tokens
+            if holder.get("change_type") == "unchanged":
+                add(finding("altered_step", "review", "Step is labelled unchanged but its wording differs.",
+                            source=text, draft=holder["text"], score=round(score, 2)), step_id, holder.get("id"))
+            elif containment(new_words, change_tokens) >= MATCH_THRESHOLD:
+                add(finding("altered_step", "info", "Step changed as described in the change request.",
+                            source=text, draft=holder["text"]), step_id, holder.get("id"))
+            else:
+                add(finding("altered_step", "review", "Step wording changed beyond the change request.",
+                            source=text, draft=holder["text"], score=round(score, 2)), step_id, holder.get("id"))
+        for item in meaning_findings(text, holder["text"], "Step", change_words):
+            add(item, step_id, holder.get("id"))
+
+    # 3. Order of the source steps that were kept
+    pairs = concordant = 0
+    inversions = []
+    for i in range(len(positions)):
+        for j in range(i + 1, len(positions)):
+            pairs += 1
+            if positions[i][1] <= positions[j][1]:
+                concordant += 1
+            else:
+                inversions.append({"before": step_text[positions[i][0]], "after": step_text[positions[j][0]]})
+    if inversions:
+        add(finding("step_order_violation", "critical",
+                    "Source steps appear in a different order in the draft.", pairs=inversions))
+
+    # 4. Added steps: supported by the source or the request? (Contradictions: step 6, all steps.)
+    source_line_tokens = [tokens(line) for line in original_lines]
+    unsupported = 0
+    for step in kept_steps:
+        if step.get("source_step_ids"):
+            continue
+        step_tokens = tokens(step["text"])
+        support = max((containment(step_tokens, line | change_tokens) for line in source_line_tokens),
+                      default=containment(step_tokens, change_tokens))
+        if support < PARTIAL_THRESHOLD:
+            unsupported += 1
+            add(finding("unsupported_instruction", "critical",
+                        "Added step is not supported by the source or the change request.",
+                        draft=step["text"], support=round(support, 2)), None, step.get("id"))
+
+    # 5. Duplicates, values and units, on the steps and warnings as written
+    duplicates = 0
+    kept_tokens = [tokens(step["text"]) for step in kept_steps]
+    for i in range(len(kept_steps)):
+        for j in range(i + 1, len(kept_steps)):
+            if dice(kept_tokens[i], kept_tokens[j]) >= DUPLICATE_THRESHOLD:
+                duplicates += 1
+                add(finding("duplicated_step", "review", "Two draft steps are near-identical.",
+                            draft=kept_steps[j]["text"]), None, kept_steps[j].get("id"))
+    allowed_numbers = set(NUMBER.findall(original_text)) | set(NUMBER.findall(change_request))
+    value_lines = [step["text"] for step in kept_steps] + [w["text"] for w in warnings]
+    new_values = sorted({n for line in value_lines for n in NUMBER.findall(line)} - allowed_numbers)
+    if new_values:
+        add(finding("unsupported_value", "critical",
+                    "Numeric values not present in the source or the change request.", values=new_values))
+    known_units = {}
+    for number, unit in value_units(original_text) | value_units(change_request):
+        known_units.setdefault(number, set()).add(unit)
+    unit_changes = sorted({f"{number} {unit}" for line in value_lines for number, unit in value_units(line)
+                           if known_units.get(number) and unit not in known_units[number]})
+    if unit_changes:
+        add(finding("unsupported_value", "critical", "Same number as the source but a different unit.",
+                    values=unit_changes))
+
+    # 6. Every kept step (added ones included) against every source prohibition; change applied
+    by_text = {step["text"]: step.get("id") for step in kept_steps}
+    for item in check_warning_conflicts([text for _, text in source_warnings],
+                                        [{"text": step["text"]} for step in kept_steps]):
+        add(item, next((wid for wid, text in source_warnings if text == item["source"]), None), by_text.get(item["draft"]))
+    for item in check_change_applied(change_request, original_text, draft):
+        add(item)
+
+    def ratio(numerator, denominator):
+        return round(numerator / denominator, 4) if denominator else None
+
+    metrics = {
+        "matching": "structured",
+        "source_warnings": len(source_warnings),
+        "warning_recall": ratio(preserved, len(source_warnings)),
+        "warning_recall_lenient": ratio(preserved + altered, len(source_warnings)),
+        "removed_warnings": sum(f["type"] == "warning_removed" for f in findings),
+        "source_steps": len(source_steps),
+        "draft_steps": len(kept_steps),
+        "step_coverage": ratio(matched_steps + altered_steps, len(source_steps)),
+        "order_integrity": ratio(concordant, pairs),
+        "unsupported_instruction_rate": ratio(unsupported, len(kept_steps)),
+        "unsupported_values": len(new_values) + len(unit_changes),
+        "omitted_steps": sum(f["type"] == "omitted_step" for f in findings),
+        "altered_steps": altered_steps,
+        "duplicated_steps": duplicates,
+        "conflicting_instructions": sum(f["type"] == "conflicting_instruction" for f in findings),
+        "contradicted_warnings": sum(f["type"] == "contradicts_warning" for f in findings),
+        "weakened_quantifiers": sum(f["type"] == "quantifier_weakened" for f in findings),
+        "actor_changes": sum(f["type"] == "actor_changed" for f in findings),
+        "change_applied": not any(f["type"] == "change_not_applied" for f in findings) if change_request.strip() else None,
+    }
+
+    severities = {f["severity"] for f in findings}
+    status = ("fail" if severities & FAILING_SEVERITIES
+              else "needs_review" if "review" in severities else "pass_automated")
+    findings.sort(key=lambda f: SEVERITY_ORDER[f["severity"]])
+    return {
+        "status": status,
+        "evaluator_version": EVALUATOR_VERSION + STRUCTURED_SUFFIX,
         "metrics": metrics,
         "findings": findings,
         "disclaimer": (

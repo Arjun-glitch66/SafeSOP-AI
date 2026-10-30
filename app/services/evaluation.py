@@ -7,18 +7,22 @@ from fastapi import HTTPException
 
 from app.db import connect_db, now
 from app.services.pdf import extract_document_text
-from src.safety_evaluator import evaluate_revision
+from src.safety_evaluator import evaluate_revision, evaluate_structured_revision
 from src.semantic_checker import apply_semantic_check
 
 logger = logging.getLogger("safesop")
 
 
-def run_and_save_evaluation(version_id, original_text, generated_text, change_request):
-    """Run the automated checks and store them. An evaluator crash must not lose the saved draft."""
+def run_and_save_evaluation(version_id, original_text, generated_text, change_request, structured=None):
+    """Run the automated checks and store them. An evaluator crash must not lose the saved draft.
+    Prompt-v3 drafts (with structured JSON) are matched by source id; older ones by text."""
     evaluation_id = str(uuid.uuid4())
     created = now()
     try:
-        evaluation = evaluate_revision(original_text, generated_text, change_request)
+        if structured:
+            evaluation = evaluate_structured_revision(original_text, generated_text, structured, change_request)
+        else:
+            evaluation = evaluate_revision(original_text, generated_text, change_request)
         # Off unless SEMANTIC_CHECK=nli|llm. Advisory: may add findings / raise status, never lower it.
         evaluation = apply_semantic_check(evaluation, original_text, generated_text)
         with connect_db() as connection:
@@ -54,7 +58,7 @@ def load_version_source(version_id):
     with connect_db() as connection:
         row = connection.execute(
             """
-            SELECT v.content, v.target_page, v.version_number, d.stored_path, d.filename,
+            SELECT v.content, v.target_page, v.version_number, v.structured_json, d.stored_path, d.filename,
                    cr.description, cr.scope
             FROM versions v
             JOIN documents d ON d.id = v.document_id

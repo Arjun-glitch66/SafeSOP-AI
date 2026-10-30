@@ -6,7 +6,8 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel
 
-from src.safety_evaluator import extract_steps, extract_warnings
+# Same numbering as the evaluator, so the ids mean the same thing to the prompt and the checks.
+from src.safety_evaluator import number_source_items
 
 load_dotenv()
 
@@ -51,14 +52,6 @@ SUMMARY_TITLES = [
     ("unresolved_questions", "UNRESOLVED QUESTIONS"),
     ("source_limitations", "SOURCE LIMITATIONS"),
 ]
-
-
-def number_source_items(original_text):
-    """Source warnings as W1..Wn and numbered steps as S1..Sn, using the evaluator's own
-    extraction so the ids mean the same thing to the prompt and to the checks."""
-    warnings = [(f"W{n}", text) for n, text in enumerate(extract_warnings(original_text), start=1)]
-    steps = [(f"S{n}", step["text"]) for n, step in enumerate(extract_steps(original_text), start=1)]
-    return warnings, steps
 
 
 def render_draft_text(draft):

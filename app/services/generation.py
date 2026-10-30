@@ -144,7 +144,8 @@ def generate_version(document_id, description, scope, target_page, parent_versio
                    "Check the backend terminal.",
         ) from exc
 
-    evaluation = run_and_save_evaluation(version_id, original_text, generated_text, description)
+    evaluation = run_and_save_evaluation(version_id, original_text, generated_text, description,
+                                         result.get("structured"))
 
     return {
         "id": version_id,

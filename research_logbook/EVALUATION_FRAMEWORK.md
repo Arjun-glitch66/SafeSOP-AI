@@ -113,6 +113,22 @@ Four rules for failures that keep most tokens, so §2.1–2.5 pass them. Each fi
 | `actor_changed` | high (review if requested) | In a matched lock, tag, isolation, permit, sign-off or verification line, the named performer changes (worker, operator, supervisor, technician, you, …). Lines that name nobody in the source are not checked. |
 | `change_not_applied` | critical | The draft section equals the original, or none of the change request's **new** numbers and terms (not in the original, not instruction words such as "replace" or "increase") appear in the draft. Removal requests are only checked for an unchanged draft. |
 
+### 2.7 Structured matching for prompt-v3 drafts
+
+From prompt v3 the source's warnings and steps are numbered (W1…, S1…) in the prompt, and the model returns every draft step and warning as JSON that cites those ids (`source_step_ids`, `source_warning_id`), with a `change_type` per step and a `removed_warning_ids` list. `evaluate_structured_revision()` (reported as `safe-sop-eval-1.2+structured`) matches by id instead of by text similarity, so §2.1–2.3 no longer depend on regex extraction of the draft:
+
+| Rule | Finding |
+|---|---|
+| A source warning not cited by any draft warning and not in `removed_warning_ids` | `missing_warning` (critical) |
+| A source warning in `removed_warning_ids` | `warning_removed` (critical): a declared removal is still a lost warning until a reviewer confirms the hazard is gone |
+| A source step not cited by any draft step | `omitted_step` (critical) |
+| A step with `change_type: removed` | `omitted_step` (critical; review if the change request asks for it) |
+| A step labelled `unchanged` whose text differs from its source | `altered_step` (review): the model's label is not trusted |
+| A draft item citing an id the source does not have | `invalid_source_reference` (review) |
+| Every kept step, including `added` ones, against every source prohibition | `contradicts_warning` (§2.6) |
+
+Opposite words, quantifier, actor, value, unit, duplicate, order and change-applied checks are the same as in the text path, run on the cited pairs and on the rendered draft. Versions without stored JSON (prompt v1/v2) keep the text path.
+
 ## 3. Decision rule
 
 | Status | Condition |

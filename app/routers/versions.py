@@ -38,7 +38,8 @@ def generate_revision(
 def evaluate_version(version_id: str):
     """Re-run the automated checks, e.g. for versions created before the evaluator existed."""
     row, original_text = load_version_source(version_id)
-    return run_and_save_evaluation(version_id, original_text, row["content"], row["description"] or "")
+    structured = json.loads(row["structured_json"]) if row["structured_json"] else None
+    return run_and_save_evaluation(version_id, original_text, row["content"], row["description"] or "", structured)
 
 
 @router.get("/api/versions/{version_id}/diff")

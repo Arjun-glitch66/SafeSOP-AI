@@ -350,3 +350,21 @@ def test_structured_draft_json_is_stored_with_the_version(client, monkeypatch):
     monkeypatch.setattr(api, "generate_sop", lambda **kwargs: {"text": "DRAFT:\n1. x", "model": "stub-model"})
     older_style = generate(client, doc_id, description="y").json()
     assert client.get(f"/api/versions/{older_style['version_id']}").json()["structured_json"] is None
+
+
+def test_v3_versions_use_the_structured_evaluator_and_old_ones_the_text_path(client, monkeypatch):
+    structured = {"preamble": "", "warnings": [{"id": "RW1", "text": "PAGE ONE: WARNING disconnect power",
+                                                "source_warning_id": "W1"}],
+                  "removed_warning_ids": [], "steps": [],
+                  "change_summary": "", "preserved_safety_requirements": "", "unresolved_questions": "",
+                  "source_limitations": ""}
+    monkeypatch.setattr(api, "generate_sop", lambda **kwargs: {
+        "text": "DRAFT:\nPAGE ONE: WARNING disconnect power", "model": "stub-model", "structured": structured})
+    doc_id = upload_two_page_pdf(client)
+    v3 = generate(client, doc_id, description="disconnect power first").json()
+    assert v3["safety_evaluation"]["evaluator_version"].endswith("+structured")
+    assert client.post(f"/api/versions/{v3['version_id']}/evaluate").json()["metrics"]["matching"] == "structured"
+
+    monkeypatch.setattr(api, "generate_sop", lambda **kwargs: {"text": "DRAFT:\nx", "model": "stub-model"})
+    old = generate(client, doc_id, description="y").json()
+    assert "+structured" not in old["safety_evaluation"]["evaluator_version"]
