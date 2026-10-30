@@ -52,3 +52,43 @@ Items the coding agent stopped on because they need a product, licence, cost or 
   login rate limiting (not built; 3.4 only limits `/generate`).
 - **2.2 Run prompt v3 once against the real Gemini API** (a few billed calls) to check that it
   fills `source_step_ids` / `source_warning_id` correctly. All tests use a stub.
+
+## Phase 3
+
+Decisions you asked to keep for yourself:
+
+- **PyMuPDF licence (AGPL-3.0).** PyMuPDF is used for PDF text extraction, page counts, OCR and
+  PDF rendering. Under the AGPL, offering the app as a network service obliges you to publish
+  the whole application's source under the AGPL, unless you buy Artifex's commercial licence.
+  Options: (a) keep the project open source under the AGPL; (b) buy the commercial licence;
+  (c) switch to pypdf (BSD) or pdfplumber (MIT) for text and page counts. Then OCR needs
+  ocrmypdf or pytesseract, and draft PDFs need another renderer (e.g. reportlab). This touches
+  `app/services/pdf.py`, `app/services/exports.py` and `app/routers/documents.py`.
+- **Which fallback LLM provider to pay for.** `LLM_FALLBACK_PROVIDER` currently supports
+  `ollama` (a local model, no API cost, needs a machine with a GPU or a lot of RAM). A second
+  paid API (e.g. Anthropic or OpenAI) needs an adapter class in `src/llm_client.py` (about 40
+  lines) and its own key and budget. Also decide whether the fallback may see the same SOP data
+  (data-processing terms).
+- **Hosting.** `docker-compose.yml` runs Postgres, the API and nginx on one host. Choose where it
+  runs (on-premises, a VM, or a managed service such as Azure Container Apps or AWS ECS with RDS),
+  plus TLS, backups of the Postgres volume and the PDF volume, and who can reach it. The API runs
+  as one process (jobs and the per-minute limit live in memory): scale it up, not out, until
+  those move to Redis/Postgres.
+- **Regulatory-text retrieval (RAG).** Not built. If you want the model or the checklists to
+  cite regulations, use only public texts (e.g. OSHA 29 CFR, US federal, public domain).
+  ISO 45001 and other ISO/IEC standards are copyrighted: do not ingest them without a licence.
+
+Could not be verified on this machine (please run once):
+
+- **Docker:** the Docker engine was not running, so no image was built. `docker compose config`
+  validates the file. Run `docker compose up --build` and sign in at http://localhost:8080.
+- **Postgres:** the app and migrations are tested on SQLite only. The Postgres DDL was generated
+  offline (`DATABASE_URL=postgresql+psycopg://... alembic upgrade head --sql`) and reviewed.
+  The first real run against Postgres (e.g. via compose) is the real test; consider running the
+  test suite against it in CI.
+- **OCR:** Tesseract is not installed here; OCR is tested with a mock. The Docker image installs it.
+- **Translations:** machine translations are checked only by back-translation. Before workers
+  use a translated SOP, a native speaker must review it, and someone must decide whether
+  translated SOPs need their own approval.
+- **Checklists:** the lockout/tagout and 1910.119(f) packs paraphrase public OSHA text. A
+  qualified safety professional should review the element lists and patterns before relying on them.

@@ -177,3 +177,14 @@ Engineering; no experiment was run. The text evaluator's output on EXP-001c is u
 - **Frontend:** sign-in, react-router routes, state split into providers and hooks, findings jump to the cited diff line, evidence-first review page with a sign-off dialog, cancellable generation. Checked in a headless browser against a throwaway database with a stubbed generator.
 - **Feedback loop:** parent-version review comments are passed to the model on regeneration; reviewers mark findings true problem / false alarm; `export_finding_feedback.py` produces labelled rows (precision only; recall still needs EXP-003).
 - **Tests:** 74 → 103.
+
+## Entry 11 — Phase 3: robustness, deployment and features; evaluator v1.3 (2026-10-30)
+
+- **Evaluator v1.3:** required-element checklists per SOP type (`missing_required_element`, critical; YAML packs for lockout/tagout and OSHA 1910.119(f)-style operating procedures) and hierarchy-of-controls downgrades (`control_downgraded`, high). EXP-001c on the same 64 cases is unchanged (status accuracy 0.938, no new false alarms), because the test set has no document types and no control downgrades. The new checks are covered by unit tests only; their accuracy on real drafts is **not measured**.
+- **Section/step scope:** only the target part goes to the model; the rest is spliced back byte for byte (tested), and such versions are evaluated whole-document.
+- **Translations:** English draft stays controlled; translation checked by an independent back-translation with the same evaluator (`translation_*` findings). Back-translation cannot judge fluency or ambiguity; native-speaker review is required (TODO_HUMAN).
+- **Robustness:** provider interface with recorded fallback; background jobs with SSE progress; prompt v4 with system-instruction rules and random boundary markers (injection test PDF); per-user rate limit and daily quota; OCR fallback.
+- **Deployment:** SQLAlchemy + Alembic (baseline = previous schema; pre-Alembic SQLite files upgraded with backup then stamped; a test proves the two routes give identical schemas), Postgres via `DATABASE_URL`, relative file paths, JSON logs, `/healthz` and `/readyz`, FK indexes, paging, Dockerfiles and compose. **Not run here:** Docker engine unavailable, no Postgres server; Postgres DDL checked offline only.
+- **CI:** ruff, mypy (lenient), pip-audit, pytest with coverage (backend 87%), ESLint, Vitest component tests (frontend coverage about 12%).
+- **Tests:** 103 → 154 backend (coverage 87%), plus 5 frontend component tests.
+- **Open (TODO_HUMAN):** PyMuPDF AGPL decision, paid fallback provider, hosting, regulatory RAG limits, Docker/Postgres/OCR first run, translation and checklist review by qualified people.

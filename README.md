@@ -94,12 +94,39 @@ npm run dev
 ```
 Open http://localhost:5173 and sign in. Pages: `/documents`, `/documents/:id`, `/versions/:id`, `/versions/:id/review`, `/checks`. The API docs are at http://127.0.0.1:8000/docs.
 
-On first start against an older database, the API backs up `data/safesop.db` to `data/backups/` and then adds the new columns and tables. No data is deleted.
+On every start the API runs the Alembic migrations (`migrations/`). A database created before Alembic is first upgraded in place (after a backup to `data/backups/`) and then stamped. No data is deleted. To migrate by hand: `alembic upgrade head`.
+
+### Run with Docker (Postgres, API, nginx)
+
+```
+copy .env.example .env      (fill in GEMINI_API_KEY, JWT_SECRET, ADMIN_PASSWORD, POSTGRES_PASSWORD)
+docker compose up --build
+```
+
+Open http://localhost:8080. The API image includes Tesseract for scanned PDFs. `/healthz` is liveness and `/readyz` checks the database and storage. Logs are JSON lines (`LOG_FORMAT=json`).
+
+### Features added in phase 3
+
+- **Background generation:** `/generate` answers 202 with a job; the page shows live progress (server-sent events) and survives "Stop watching".
+- **LLM fallback:** `LLM_FALLBACK_PROVIDER=ollama` (a local model) takes over when Gemini fails; every version records the provider and whether the fallback was used.
+- **Prompt-injection hardening:** rules in the system instruction; the PDF text is fenced by random per-request markers and treated as data.
+- **Limits:** `GENERATE_PER_MINUTE` (default 5) and `GENERATE_PER_DAY` (default 100) per user.
+- **Required-element checklists:** choose an SOP type at upload (lockout/tagout; OSHA 1910.119(f) operating procedure); losing a required element fails the draft.
+- **Hierarchy of controls:** replacing a guard, interlock or ventilation with training, signs or PPE is flagged.
+- **Section and step scope:** revise one section or step; everything else stays word for word.
+- **Translations:** Hindi and 9 other Indian languages, checked by independent back-translation.
+- **OCR** for scanned pages (needs Tesseract).
+- **Exports:** approved versions as DOCX/PDF with the approval record and change log; evaluation report as PDF.
+- **Comparison:** version against version, and an original-PDF preview pane.
+- **Dark mode** and self-hosted fonts.
 
 ## Test and evaluate
 
 ```
-.venv\Scripts\python -m pytest -q                                           # 103 tests, Gemini stubbed
+.venv\Scripts\python -m pytest -q                                           # 154 tests, Gemini stubbed
+.venv\Scripts\pip install -r requirements-dev.txt                          # ruff, mypy, pip-audit, pytest-cov
+.venv\Scripts\ruff check . ; .venv\Scripts\mypy ; .venv\Scripts\python -m pytest --cov
+cd frontend ; npm run lint ; npm test ; npm run test:coverage
 .venv\Scripts\python evaluation\validate_evaluator.py                      # EXP-001c (64 cases), no API key needed
 .venv\Scripts\python evaluation\make_charts.py                             # figures in results\charts
 .venv\Scripts\python evaluation\run_generation_experiment.py --repeats 3   # EXP-002, needs Gemini key
@@ -120,7 +147,12 @@ GitHub Actions (`.github/workflows/ci.yml`) runs the tests, EXP-001 and the fron
 
 | Path | Purpose |
 |---|---|
-| `app/` | FastAPI app: `main.py`, `config.py`, `db.py` (schema + migration), `auth.py`, `audit.py`, `routers/`, `services/` |
+| `app/` | FastAPI app: `main.py`, `config.py`, `db.py` (SQLAlchemy engine + adapter), `auth.py`, `audit.py`, `limits.py`, `routers/`, `services/` (generation, jobs, evaluation, pdf, sections, exports) |
+| `migrations/` | Alembic schema migrations (`alembic upgrade head`) |
+| `src/llm_client.py` | LLM provider interface (Gemini, Ollama) with recorded fallback |
+| `src/translator.py` | Regional-language output and the back-translation check |
+| `src/checklists/` | Required-element rule packs (YAML) per SOP type |
+| `Dockerfile`, `docker-compose.yml`, `frontend/Dockerfile` | Containers: API, Postgres, nginx-served frontend |
 | `api.py` | Compatibility shim so `uvicorn api:app` and `import api` keep working |
 | `src/sop_generator.py` | Gemini prompt (`PROMPT_VERSION`) and generation |
 | `src/safety_evaluator.py` | SAFE-SOP automated evaluator (`evaluate_revision`) |
@@ -137,8 +169,10 @@ GitHub Actions (`.github/workflows/ci.yml`) runs the tests, EXP-001 and the fron
 
 ## Known limitations
 
-- Text-based PDFs only (no OCR). Page-scoped output is text and does not reproduce the PDF layout.
-- Only full-document and single-page scopes are supported. Section and step scopes are not implemented.
+- OCR needs Tesseract on the server (included in the Docker image). All outputs are text and do not reproduce the PDF layout.
+- Sections are detected by shape (ALL-CAPS or "Title:" lines); SOPs styled differently show no sections and keep full/page scope.
 - The evaluator compares words, not meaning. v1.1 added opposite words (on/off, open/close, …) and unit changes (rpm → rcf); v1.2 adds warning contradictions, quantifier, actor and change-applied checks, all from word lists. It still misses meaning changes outside those lists (3 of 24 held-out cases, e.g. "any" → "most"), flags some correct paraphrases for review, and has not been measured on real model errors yet. See the logbook, entries 2, 4 and 9.
 - Sign-in has no password reset, account lockout or login rate limit yet, and users are managed through the API only. Keep it on a trusted network.
-- Cancelling a generation in the browser stops waiting; the server may still finish and save the draft (background jobs are planned).
+- Background jobs and the per-minute rate limit live in the API process: run one API process (scale up, not out) until they move to Redis or Postgres.
+- Postgres support, the Docker images and OCR were not run on the development machine (see TODO_HUMAN.md).
+- PyMuPDF is AGPL-licensed; see TODO_HUMAN.md before offering the app as a service.
