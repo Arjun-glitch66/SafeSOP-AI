@@ -1,3 +1,5 @@
+"""Manual check that GEMINI_API_KEY works. Makes one real (billed) API call.
+Run: python scripts/check_gemini.py. Not a test; pytest never collects it."""
 
 import os
 from dotenv import load_dotenv
