@@ -24,6 +24,10 @@ MAX_FEEDBACK_CHARS = 2000
 GENERATION_WORKERS = int(os.getenv("GENERATION_WORKERS", "2"))
 JOB_STREAM_SECONDS = 600
 
+# Per-user limits on /generate (each call is a billed model request). 0 disables a limit.
+GENERATE_PER_MINUTE = int(os.getenv("GENERATE_PER_MINUTE", "5"))
+GENERATE_PER_DAY = int(os.getenv("GENERATE_PER_DAY", "100"))
+
 # Authentication. JWT_SECRET must be set in production (any long random string); without it
 # a random per-process secret is used and every login ends when the API restarts.
 JWT_SECRET = os.getenv("JWT_SECRET", "")

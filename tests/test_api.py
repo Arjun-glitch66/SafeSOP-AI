@@ -30,6 +30,7 @@ def client(tmp_path, monkeypatch):
 
     monkeypatch.setattr(api, "generate_sop", fake_generate_sop)
     monkeypatch.setattr(api, "BCRYPT_ROUNDS", 4)  # fast hashing in tests only
+    api.reset()  # per-minute generation windows from earlier tests
     monkeypatch.setattr(api, "ADMIN_USERNAME", "admin")
     monkeypatch.setattr(api, "ADMIN_PASSWORD", ADMIN_PASSWORD)
     with TestClient(api.app) as test_client:
@@ -722,3 +723,30 @@ def test_a_draft_that_obeyed_an_injection_in_the_pdf_still_fails_the_checks(clie
     evaluation = generate(client, doc_id, description="Use a lockable isolator.").json()["safety_evaluation"]
     assert evaluation["status"] == "fail"
     assert any(f["type"] == "missing_warning" for f in evaluation["findings"])
+
+
+
+# --- 3.4 rate limit and daily quota on /generate ---
+
+def test_generate_is_rate_limited_per_user(client, monkeypatch):
+    monkeypatch.setattr(api, "GENERATE_PER_MINUTE", 2)
+    doc_id = upload_two_page_pdf(client)
+    assert generate(client, doc_id, description="a").status_code == 200
+    assert generate(client, doc_id, description="b").status_code == 200
+    limited = generate(client, doc_id, description="c")
+    assert limited.status_code == 429 and "per minute" in limited.json()["detail"]
+    assert 1 <= int(limited.headers["Retry-After"]) <= 61
+    # Another user has their own window.
+    assert generate(client, doc_id, description="d", headers=client.admin).status_code == 200
+
+
+def test_generate_has_a_daily_quota(client, monkeypatch):
+    monkeypatch.setattr(api, "GENERATE_PER_DAY", 2)
+    monkeypatch.setattr(api, "GENERATE_PER_MINUTE", 0)
+    doc_id = upload_two_page_pdf(client)
+    generate(client, doc_id, description="a")
+    generate(client, doc_id, description="b")
+    over = generate(client, doc_id, description="c")
+    assert over.status_code == 429 and "Daily generation quota" in over.json()["detail"]
+    assert int(over.headers["Retry-After"]) <= 86400
+    assert client.prompts and len(client.prompts) == 2  # the refused call never reached the model

@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from app import config
 from app.auth import require_role
+from app.limits import check_generate_allowed
 from app.schemas import FINDING_VERDICTS
 from app.db import connect_db, now
 from app.services.evaluation import load_version_source, run_and_save_evaluation
@@ -39,6 +40,7 @@ def generate_revision(
     With request_id, the saved change request supplies the description, scope and
     target page (submitted values for those are ignored) and is linked to the draft.
     """
+    check_generate_allowed(user["username"])  # 429 before any work
     prepared = prepare_generation(document_id, description, scope, target_page, parent_version_id, request_id,
                                   created_by=user["username"])
     job = jobs.submit(prepared)
