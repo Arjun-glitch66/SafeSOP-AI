@@ -186,6 +186,21 @@ NUMBERED SOURCE ITEMS (data; W = warning, S = procedure step):
 """
 
 
+def render_part_lines(draft, first_step_number=1):
+    """A revised section or step, numbered to continue the original document's steps."""
+    draft = draft if isinstance(draft, dict) else draft.model_dump()
+    kept = [step for step in draft["steps"] if step["change_type"] != "removed"]
+    lines = [draft["preamble"].strip()] if draft["preamble"].strip() else []
+    lines += [warning["text"].strip() for warning in draft["warnings"]]
+    lines += [f"{number}. {step['text'].strip()}" for number, step in enumerate(kept, start=first_step_number)]
+    return lines
+
+
+def render_summaries(draft):
+    draft = draft if isinstance(draft, dict) else draft.model_dump()
+    return "\n\n".join(f"{title}:\n{draft[key].strip()}" for key, title in SUMMARY_TITLES)
+
+
 def check_complete_draft(result):
     """Reject output that cannot be a draft (cut off mid-JSON, blocked, or empty), so no
     version is ever saved from a fragment. Raising here also lets the fallback provider run."""

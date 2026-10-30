@@ -22,7 +22,7 @@ def client(tmp_path, monkeypatch):
     prompts = []
     feedbacks = []
 
-    def fake_generate_sop(original_text, change_request, output_scope, target_page, feedback=None):
+    def fake_generate_sop(original_text, change_request, output_scope, target_page, feedback=None, target_section=None):
         prompts.append(original_text)
         feedbacks.append(feedback)
         return {"text": f"DRAFT:\nREVISED ({output_scope}) {change_request}", "model": "stub-model",
@@ -796,3 +796,67 @@ def test_document_type_at_upload_selects_the_checklist(client):
     assert client.get(f"/api/documents/{doc_id}").json()["document_type"] == "lockout_tagout"
     evaluation = generate(client, doc_id, description="x").json()["safety_evaluation"]
     assert any(f["type"] == "missing_required_element" for f in evaluation["findings"])  # stub draft drops it
+
+
+# --- 3.9 section and step scope ---
+
+def upload_sectioned_pdf(client):
+    pdf = pymupdf.open()
+    page = pdf.new_page()
+    lines = ["Pump Maintenance", "SAFETY WARNINGS", "WARNING: Never open the cover while the motor is running.",
+             "PROCEDURE", "1. Switch off the motor at the isolator.", "2. Open the cover.",
+             "CLEANING", "3. Wipe the rotor.", "4. Close the cover."]
+    for i, line in enumerate(lines):
+        page.insert_text((72, 72 + 18 * i), line, fontsize=10)
+    return client.post("/api/documents/upload", files={"file": ("pump.pdf", pdf.tobytes(), "application/pdf")}).json()["id"]
+
+
+def part_draft(steps, preamble="CLEANING"):
+    return {"preamble": preamble, "warnings": [], "removed_warning_ids": [],
+            "steps": [{"id": f"R{n}", "text": text, "source_step_ids": [f"S{n}"], "change_type": "modified"}
+                      for n, text in enumerate(steps, start=1)],
+            "change_summary": "Ethanol for the rotor.", "preserved_safety_requirements": "", "unresolved_questions": "",
+            "source_limitations": ""}
+
+
+def test_section_scope_sends_only_the_section_and_keeps_everything_else_byte_for_byte(client, monkeypatch):
+    doc_id = upload_sectioned_pdf(client)
+    outline = client.get(f"/api/documents/{doc_id}/outline").json()
+    assert [s["title"] for s in outline["sections"]] == ["SAFETY WARNINGS", "PROCEDURE", "CLEANING"]
+    sent = []
+
+    def stub(**kwargs):
+        sent.append(kwargs)
+        return {"text": "unused", "model": "stub-model", "structured": part_draft(
+            ["Wipe the rotor with 70 percent ethanol.", "Close the cover."])}
+
+    monkeypatch.setattr(api, "generate_sop", stub)
+    version = generate(client, doc_id, description="Wipe the rotor with 70 percent ethanol.",
+                       scope="section", target_section="sec3").json()
+    assert sent[0]["output_scope"] == "section" and sent[0]["target_section"] == "SEC3"
+    assert sent[0]["original_text"] == "CLEANING\n3. Wipe the rotor.\n4. Close the cover."
+
+    full_text = api.extract_document_text(str(api.resolve(f"{api.UPLOAD_DIR}/{doc_id}.pdf")), "full", None)[0]
+    cut = full_text.index("CLEANING")
+    draft = version["content"]
+    assert draft.startswith("DRAFT:\n" + full_text[:cut])  # everything before the section, byte for byte
+    assert "CLEANING\n3. Wipe the rotor with 70 percent ethanol.\n4. Close the cover.\n\nCHANGE SUMMARY:" in draft
+    assert version["target_section"] == "SEC3"
+    findings = version["safety_evaluation"]["findings"]
+    assert not any(f["severity"] in ("critical", "high") for f in findings), findings  # untouched parts raise nothing
+
+
+def test_step_scope_keeps_the_step_number(client, monkeypatch):
+    doc_id = upload_sectioned_pdf(client)
+    monkeypatch.setattr(api, "generate_sop", lambda **kwargs: {"text": "unused", "model": "stub-model", "structured": part_draft(
+        ["Switch off the motor at the isolator and lock it."], preamble="")})
+    version = generate(client, doc_id, description="Lock the isolator.", scope="step", target_section="S1").json()
+    assert "\n1. Switch off the motor at the isolator and lock it.\n2. Open the cover.\n" in version["content"]
+
+
+def test_part_scope_needs_an_existing_target(client):
+    doc_id = upload_sectioned_pdf(client)
+    assert generate(client, doc_id, description="x", scope="section").status_code == 400
+    missing = generate(client, doc_id, description="x", scope="section", target_section="SEC9")
+    assert missing.status_code == 400 and "SEC1, SEC2, SEC3" in missing.json()["detail"]
+    assert client.prompts == []

@@ -92,6 +92,8 @@ def load_version_source(version_id):
         raise HTTPException(status_code=404, detail="Version not found.")
 
     scope = row["scope"] or "full"
+    if scope in ("section", "step"):
+        scope = "full"  # the stored draft is the whole document with one part replaced
     if scope == "page" and row["target_page"] is None:
         raise HTTPException(
             status_code=422,

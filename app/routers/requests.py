@@ -17,22 +17,29 @@ def create_change_request(
     description: str = Form(..., max_length=config.MAX_DESCRIPTION_CHARS),
     scope: str = Form("full"),
     target_page: int | None = Form(None),
+    target_section: str | None = Form(None, max_length=20),
     user=Depends(require_role("author")),
 ):
     description = description.strip()
     scope = scope.strip().lower()
+    target_section = (target_section or "").strip().upper() or None
 
     if not description:
         raise HTTPException(status_code=400, detail="Describe the process change.")
-    if scope not in {"full", "page"}:
+    if scope not in {"full", "page", "section", "step"}:
         raise HTTPException(
             status_code=400,
-            detail="Scope must be 'full' or 'page'.",
+            detail="Scope must be 'full', 'page', 'section' or 'step'.",
         )
-    if scope == "full":
+    if scope != "page":
         target_page = None
     elif target_page is None or target_page < 1:
         raise HTTPException(status_code=400, detail="For page scope, provide target_page (starting at 1).")
+    if scope in ("section", "step"):
+        if not target_section:
+            raise HTTPException(status_code=400, detail=f"For {scope} scope, choose target_section.")
+    else:
+        target_section = None
 
     with connect_db() as connection:
         document = connection.execute(
@@ -52,10 +59,10 @@ def create_change_request(
         connection.execute(
             """
             INSERT INTO change_requests
-                (id, document_id, description, scope, target_page, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+                (id, document_id, description, scope, target_page, target_section, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (request_id, document_id, description, scope, target_page, created),
+            (request_id, document_id, description, scope, target_page, target_section, created),
         )
 
     return {
@@ -64,6 +71,7 @@ def create_change_request(
         "description": description,
         "scope": scope,
         "target_page": target_page,
+        "target_section": target_section,
         "created_at": created,
         "status": "saved",
         "message": "Change request saved. Submit it to the generation endpoint to create a draft.",

@@ -12,22 +12,29 @@ from app.audit import append_audit
 from app.db import connect_db, now
 from app.services.evaluation import run_and_save_evaluation
 from app.services.pdf import extract_document_text
+from app.services.sections import locate, part_text, splice
 from app.storage import resolve
-from src.sop_generator import generate_sop
+from src.safety_evaluator import extract_draft_section
+from src.sop_generator import generate_sop, render_part_lines, render_summaries
 
 logger = logging.getLogger("safesop")
 
+SCOPES = {"full", "page", "section", "step"}
+PART_SCOPES = {"section", "step"}
 
-def generate_version(document_id, description, scope, target_page, parent_version_id, request_id, created_by):
+
+def generate_version(document_id, description, scope, target_page, parent_version_id, request_id, created_by,
+                     target_section=None):
     """
     Generate and save an AI draft in the calling thread. This is not safety approval.
     The API runs the same two steps with run_generation() on a background worker.
     """
     return run_generation(prepare_generation(document_id, description, scope, target_page, parent_version_id,
-                                             request_id, created_by))
+                                             request_id, created_by, target_section))
 
 
-def prepare_generation(document_id, description, scope, target_page, parent_version_id, request_id, created_by):
+def prepare_generation(document_id, description, scope, target_page, parent_version_id, request_id, created_by,
+                       target_section=None):
     """
     Everything that can fail fast, before the (slow, billed) model call: input checks, limits,
     reading the original PDF and recording the change request. Raises HTTPException 4xx.
@@ -79,24 +86,36 @@ def prepare_generation(document_id, description, scope, target_page, parent_vers
             detail="request_id must be a saved change request for this document.",
         )
     if saved_request:
-        description, scope, target_page = (
-            saved_request["description"], saved_request["scope"], saved_request["target_page"]
+        description, scope, target_page, target_section = (
+            saved_request["description"], saved_request["scope"], saved_request["target_page"],
+            saved_request["target_section"],
         )
 
     description = (description or "").strip()
     scope = scope.strip().lower()
     if not description:
         raise HTTPException(status_code=400, detail="Describe the process change.")
-    if scope not in {"full", "page"}:
-        raise HTTPException(status_code=400, detail="Scope must be 'full' or 'page'.")
+    if scope not in SCOPES:
+        raise HTTPException(status_code=400, detail="Scope must be 'full', 'page', 'section' or 'step'.")
+    target_section = (target_section or "").strip().upper() or None
+    if scope in PART_SCOPES and not target_section:
+        raise HTTPException(status_code=400, detail=f"For {scope} scope, choose target_section (see the document outline).")
 
     original_path = resolve(document["stored_path"])
     if not original_path.is_file():
         raise HTTPException(status_code=404, detail="Original PDF file is missing.")
 
-    original_text, resolved_page = extract_document_text(
-        str(original_path), scope, target_page, max_pages=config.MAX_PDF_PAGES
-    )
+    span = None
+    if scope in PART_SCOPES:
+        # Only the target part goes to the model; the rest is spliced back unchanged afterwards.
+        full_text, _ = extract_document_text(str(original_path), "full", None, max_pages=config.MAX_PDF_PAGES)
+        span = locate(full_text, scope, target_section)
+        original_text, resolved_page = part_text(full_text, *span[:2]), None
+    else:
+        original_text, resolved_page = extract_document_text(
+            str(original_path), scope, target_page, max_pages=config.MAX_PDF_PAGES
+        )
+        full_text = original_text
     if len(original_text) > config.MAX_SOURCE_CHARS:
         raise HTTPException(
             status_code=413,
@@ -111,15 +130,16 @@ def prepare_generation(document_id, description, scope, target_page, parent_vers
             connection.execute(
                 """
                 INSERT INTO change_requests
-                    (id, document_id, description, scope, target_page, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                    (id, document_id, description, scope, target_page, target_section, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (request_id, document_id, description, scope, resolved_page, now()),
+                (request_id, document_id, description, scope, resolved_page, target_section, now()),
             )
 
     return {
         "document_id": document_id, "filename": document["filename"], "document_type": document["document_type"],
-        "description": description, "scope": scope,
+        "description": description, "scope": scope, "target_section": target_section,
+        "full_text": full_text, "span": span,
         "original_text": original_text, "resolved_page": resolved_page, "parent_version_id": parent_version_id or None,
         "request_id": request_id, "review_feedback": review_feedback, "created_by": created_by,
     }
@@ -140,6 +160,7 @@ def run_generation(prepared, progress=lambda stage: None):
             change_request=description,
             output_scope=scope,
             target_page=resolved_page,
+            target_section=prepared["target_section"],
             feedback=review_feedback,
         )
     except Exception as exc:
@@ -153,6 +174,19 @@ def run_generation(prepared, progress=lambda stage: None):
 
     progress("saving")
     generated_text = result["text"]
+    evaluate_against, evaluate_structured = original_text, result.get("structured")
+    if prepared["span"]:
+        # Section/step scope: the stored draft is the whole document with only the target part
+        # replaced. Checks compare whole documents; the model's source ids are local to the part,
+        # so the text path is used.
+        start, end, first_step = prepared["span"]
+        structured = result.get("structured")
+        revised = ("\n".join(render_part_lines(structured, first_step)) if structured
+                   else extract_draft_section(result["text"])[0])
+        generated_text = "DRAFT:\n" + splice(prepared["full_text"], start, end, revised)
+        if structured:
+            generated_text += "\n\n" + render_summaries(structured)
+        evaluate_against, evaluate_structured = prepared["full_text"], None
     version_id = str(uuid.uuid4())
     created_version = now()
 
@@ -176,6 +210,7 @@ def run_generation(prepared, progress=lambda stage: None):
                 result.get("structured_output"),
                 json.dumps(result["structured"]) if result.get("structured") else None,
                 created_by,
+                prepared["target_section"],
                 result.get("provider"),
                 int(bool(result.get("fallback_used"))),
                 result.get("fallback_reason"),
@@ -197,8 +232,8 @@ def run_generation(prepared, progress=lambda stage: None):
         ) from exc
 
     progress("evaluating")
-    evaluation = run_and_save_evaluation(version_id, original_text, generated_text, description,
-                                         result.get("structured"), resolved_page, prepared["document_type"])
+    evaluation = run_and_save_evaluation(version_id, evaluate_against, generated_text, description,
+                                         evaluate_structured, resolved_page, prepared["document_type"])
 
     return {
         "id": version_id,
@@ -213,6 +248,7 @@ def run_generation(prepared, progress=lambda stage: None):
         "source_document_id": document_id,
         "parent_version_id": parent_version_id or None,
         "target_page": resolved_page,
+        "target_section": prepared["target_section"],
         "model": result.get("model"),
         "prompt_version": result.get("prompt_version"),
         "temperature": result.get("temperature"),
@@ -250,8 +286,8 @@ def insert_numbered_version(document_id, values, audit, attempts=3):
                     (id, document_id, request_id, content, created_at, source_document_id,
                      parent_version_id, target_page, model, prompt_version, input_tokens,
                      output_tokens, temperature, structured_output, structured_json, created_by,
-                     provider, fallback_used, fallback_reason, version_number, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')
+                     target_section, provider, fallback_used, fallback_reason, version_number, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')
                 """,
                 (*values, next_version),
             )

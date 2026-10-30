@@ -157,6 +157,7 @@ DOCUMENT_COLUMNS = {
 CHANGE_REQUEST_COLUMNS = {
     "target_page": "INTEGER",
 }
+# Later columns (target_section, documents.document_type, ...) are Alembic revisions only.
 
 # What an approval signed: the checks it was shown, the original PDF and the exact draft text.
 REVIEW_COLUMNS = {

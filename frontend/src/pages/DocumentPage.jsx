@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { ArrowDownToLine, BookOpen, Check, CheckCircle2, FileClock, FileText, Files, History, ShieldCheck, Sparkles, Workflow, X } from "lucide-react";
-import { createChangeRequest, downloadOriginal, followJob, generateRevision, getDocument, getDocumentVersions } from "../api.js";
+import { createChangeRequest, downloadOriginal, followJob, generateRevision, getDocument, getDocumentVersions, getOutline } from "../api.js";
 import { Badge, EmptyState } from "../components/ui.jsx";
 import { evaluationLabel, evaluationTone, statusLabel, statusTone } from "../components/labels.js";
 import { useAuth, useBackend, useNotice, useResource, useTitle } from "../state.jsx";
@@ -9,8 +9,8 @@ import { useAuth, useBackend, useNotice, useResource, useTitle } from "../state.
 const SCOPES = [
   { name: "Full document", value: "full", desc: "Complete revised SOP", icon: Files },
   { name: "Selected page", value: "page", desc: "One page only (text, not PDF layout)", icon: FileText },
-  { name: "Selected section", desc: "Not supported yet", icon: BookOpen, disabled: true },
-  { name: "Selected step", desc: "Not supported yet", icon: Workflow, disabled: true },
+  { name: "Selected section", value: "section", desc: "One section; the rest is kept word for word", icon: BookOpen },
+  { name: "Selected step", value: "step", desc: "One step; the rest is kept word for word", icon: Workflow },
 ];
 
 export default function DocumentPage() {
@@ -60,7 +60,10 @@ function RequestForm({ doc, onGenerated }) {
   // "Regenerate from original" on a version page arrives here with that version as the parent.
   const parentFromVersion = location.state?.parent;
   const [parent, setParent] = useState(parentFromVersion || null);
-  const [scope, setScope] = useState(parentFromVersion?.scope === "page" ? "page" : "full");
+  const [scope, setScope] = useState(parentFromVersion?.scope || "full");
+  const [targetSection, setTargetSection] = useState(parentFromVersion?.target_section || "");
+  const outline = useResource(() => getOutline(doc.id), [doc.id]);
+  const parts = scope === "section" ? outline.data?.sections || [] : scope === "step" ? outline.data?.steps || [] : [];
   const [targetPage, setTargetPage] = useState(String(parentFromVersion?.target_page || 1));
   const [changeRequest, setChangeRequest] = useState(parentFromVersion?.change_request || "");
   const [saved, setSaved] = useState(null);
@@ -76,6 +79,10 @@ function RequestForm({ doc, onGenerated }) {
       show(`Enter a target page between 1 and ${doc.page_count || "the last page"}.`, "error");
       return false;
     }
+    if ((scope === "section" || scope === "step") && !targetSection) {
+      show(`Choose the ${scope} to revise.`, "error");
+      return false;
+    }
     return true;
   }
 
@@ -88,7 +95,7 @@ function RequestForm({ doc, onGenerated }) {
       // The backend always reads the immutable original PDF, never a previous draft.
       // It answers at once with a job; the model call runs in the background.
       const accepted = await generateRevision(doc.id, {
-        description: changeRequest.trim(), scope, targetPage: Number(targetPage),
+        description: changeRequest.trim(), scope, targetPage: Number(targetPage), targetSection,
         parentVersionId: parent?.id, requestId,
       });
       setStage(accepted.stage_text);
@@ -114,7 +121,7 @@ function RequestForm({ doc, onGenerated }) {
     if (!ready()) return;
     setSaving(true);
     try {
-      setSaved(await createChangeRequest(doc.id, changeRequest.trim(), scope, Number(targetPage)));
+      setSaved(await createChangeRequest(doc.id, changeRequest.trim(), scope, Number(targetPage), targetSection));
       show("Change request saved. AI generation has not run yet.");
     } catch (error) {
       show(`Could not save request: ${error.message}`, "error");
@@ -135,6 +142,15 @@ function RequestForm({ doc, onGenerated }) {
           </button>
         ))}
       </div>
+
+      {(scope === "section" || scope === "step") && <>
+        <label className="field-label" htmlFor="target-section">{scope === "section" ? "Section" : "Step"} to revise</label>
+        <select id="target-section" className="form-input" value={targetSection} onChange={(event) => setTargetSection(event.target.value)}>
+          <option value="">Choose…</option>
+          {parts.map((part) => <option key={part.id} value={part.id}>{part.title ?? `${part.number}. ${part.text}`.slice(0, 90)}</option>)}
+        </select>
+        {outline.data && parts.length === 0 && <p className="small-note">No {scope}s were detected in this PDF's text. Use full-document or page scope.</p>}
+      </>}
 
       {scope === "page" && <>
         <label className="field-label" htmlFor="target-page">Target page{doc.page_count ? ` (1–${doc.page_count})` : ""}</label>
@@ -159,7 +175,7 @@ function RequestForm({ doc, onGenerated }) {
       </>}
 
       {saved && !generating && <div className="request-summary">
-        <p><strong>Saved request:</strong> {saved.scope === "page" ? `page ${saved.target_page}` : "full document"} · {saved.description}</p>
+        <p><strong>Saved request:</strong> {saved.scope === "page" ? `page ${saved.target_page}` : saved.target_section ? `${saved.scope} ${saved.target_section}` : "full document"} · {saved.description}</p>
         <button className="btn btn-primary" disabled={!online} onClick={() => generate(saved.id)}><Sparkles size={16} /> Generate draft from this saved request</button>
       </div>}
     </section>

@@ -13,6 +13,8 @@ from app.audit import append_audit
 from app.auth import require_role
 from app.db import connect_db, now
 from app.pagination import page_params, paginate
+from app.services.pdf import extract_document_text
+from app.services.sections import outline
 from app.storage import resolve, to_stored_path
 from src.checklists import available_types
 
@@ -188,3 +190,16 @@ def download_original(document_id: str):
 def list_checklists():
     """SOP types with a required-element checklist; pass one as document_type at upload."""
     return {"checklists": available_types()}
+
+
+@router.get("/api/documents/{document_id}/outline")
+def document_outline(document_id: str):
+    """Sections (SEC1..) and steps (S1..) found in the PDF text, for section- and step-scoped revision."""
+    with connect_db() as connection:
+        row = connection.execute("SELECT stored_path FROM documents WHERE id = ?", (document_id,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Document not found.")
+    full_text, _ = extract_document_text(str(resolve(row["stored_path"])), "full", None)
+    sections, steps = outline(full_text)
+    return {"sections": [{"id": s["id"], "title": s["title"]} for s in sections],
+            "steps": [{"id": s["id"], "number": s["number"], "text": s["text"]} for s in steps]}

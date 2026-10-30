@@ -86,17 +86,26 @@ export const getChecklists = async () => (await request("/api/checklists")).chec
 export const getDocumentVersions = async (documentId) =>
   (await request(`/api/documents/${id(documentId)}/versions`)).versions;
 
-export const createChangeRequest = (documentId, description, scope = "full", targetPage = null) =>
+export const createChangeRequest = (documentId, description, scope = "full", targetPage = null, targetSection = null) =>
   request(`/api/documents/${id(documentId)}/requests`, {
-    method: "POST", body: form({ description, scope, target_page: scope === "page" ? targetPage : null }),
+    method: "POST", body: form({ description, scope, ...partFields(scope, targetPage, targetSection) }),
   });
 
 // With requestId, the backend takes description, scope and page from that saved request.
 // `signal` (AbortController) lets the user stop waiting for a long generation.
-export function generateRevision(documentId, { description, scope = "full", targetPage = null, parentVersionId = null, requestId = null, signal } = {}) {
+// Page scope sends a page number; section and step scope send the outline id (SEC2, S4).
+function partFields(scope, targetPage, targetSection) {
+  if (scope === "page") return { target_page: targetPage };
+  if (scope === "section" || scope === "step") return { target_section: targetSection };
+  return {};
+}
+
+export const getOutline = (documentId) => request(`/api/documents/${id(documentId)}/outline`);
+
+export function generateRevision(documentId, { description, scope = "full", targetPage = null, targetSection = null, parentVersionId = null, requestId = null, signal } = {}) {
   const fields = requestId
     ? { request_id: requestId }
-    : { description, scope, target_page: scope === "page" ? targetPage : null };
+    : { description, scope, ...partFields(scope, targetPage, targetSection) };
   return request(`/api/documents/${id(documentId)}/generate`, {
     method: "POST", signal, body: form({ ...fields, parent_version_id: parentVersionId }),
   });

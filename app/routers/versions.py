@@ -30,6 +30,7 @@ def generate_revision(
     target_page: int | None = Form(None),
     parent_version_id: str | None = Form(None),
     request_id: str | None = Form(None),
+    target_section: str | None = Form(None, max_length=20),
     user=Depends(require_role("author")),
 ):
     """
@@ -43,7 +44,7 @@ def generate_revision(
     """
     check_generate_allowed(user["username"])  # 429 before any work
     prepared = prepare_generation(document_id, description, scope, target_page, parent_version_id, request_id,
-                                  created_by=user["username"])
+                                  created_by=user["username"], target_section=target_section)
     job = jobs.submit(prepared)
     return JSONResponse(status_code=202, content={
         "job_id": job["id"], "status": job["status"], "stage_text": job["stage_text"],
