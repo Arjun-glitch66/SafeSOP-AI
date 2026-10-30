@@ -1,11 +1,12 @@
-# SAFE-SOP Evaluation Framework (v1.1)
+# SAFE-SOP Evaluation Framework (v1.2)
 
-Implementation: `src/safety_evaluator.py` → `evaluate_revision()` · version tag `safe-sop-eval-1.1`
+Implementation: `src/safety_evaluator.py` → `evaluate_revision()` · version tag `safe-sop-eval-1.2`
 
 | Version | Change | Evidence |
 |---|---|---|
 | 1.0 | §2.1–2.4 as first defined | EXP-001 (logbook entry 2) |
 | 1.1 | Added the opposite-word check (§2.5) and the number+unit check (§2.4); merged steps are no longer counted as an order reversal (§2.3) | EXP-001b (logbook entry 4) |
+| 1.2 | Added warning-contradiction, quantifier, actor and change-applied checks (§2.6); `all`, `any`, `each`, `before`, `after` are no longer stop-words; new `high` severity | EXP-001c (logbook entry 9) |
 
 This framework checks an AI-generated SOP draft against the **immutable original SOP** and the **engineer's change request**. It does not decide whether a procedure is safe. It decides whether the draft shows evidence of specific, well-defined failure types. Only a qualified human reviewer can approve a draft.
 
@@ -101,13 +102,26 @@ support(*d*) = max over source lines ℓ of cont(tok(*d*), tok(ℓ) ∪ tok(*C*)
 
 A fixed list of opposite-meaning pairs (on/off, open/close, raise/lower, start/stop, before/after, tighten/loosen, increase/decrease, enable/disable, connect/disconnect, lock/unlock, above/below, minimum/maximum, engage/disengage) is checked for every matched warning and step. If the source uses one word of a pair and the draft uses only the other, the result is a `conflicting_instruction`. These swaps keep almost every token, so §2.2's overlap scores cannot see them.
 
+### 2.6 Meaning checks (v1.2)
+
+Four rules for failures that keep most tokens, so §2.1–2.5 pass them. Each finding quotes its evidence (`source`, `draft`, `evidence`) with the 1-based line numbers in the original text and in the draft section (`source_line`, `draft_line`).
+
+| Finding | Severity | Rule |
+|---|---|---|
+| `contradicts_warning` | critical | Every source warning that forbids something ("do not / never / must not" + verb + object, optionally "while / when / with / without / that / if …" + condition) is compared with **every** draft step, including new ones. A step without negation that uses the verb (crude stem match), contains ≥ 50 % of the object tokens, and, if the warning has a condition, ≥ 50 % of the condition tokens, does what the warning forbids. |
+| `quantifier_weakened` | critical (review if the change request uses the weaker word) | In a matched warning or step, a strong word (all, every, each, always, before) disappears and a weaker one (some, most, a, single, few, sometimes, after, during, while, once, …) appears. `before → after` alone is already a `conflicting_instruction` (§2.5) and is not reported twice. |
+| `actor_changed` | high (review if requested) | In a matched lock, tag, isolation, permit, sign-off or verification line, the named performer changes (worker, operator, supervisor, technician, you, …). Lines that name nobody in the source are not checked. |
+| `change_not_applied` | critical | The draft section equals the original, or none of the change request's **new** numbers and terms (not in the original, not instruction words such as "replace" or "increase") appear in the draft. Removal requests are only checked for an unchanged draft. |
+
 ## 3. Decision rule
 
 | Status | Condition |
 |---|---|
-| `fail` | At least one **critical** finding |
-| `needs_review` | No critical findings, but at least one **review** finding |
-| `pass_automated` | No critical or review findings |
+| `fail` | At least one **critical** or **high** finding |
+| `needs_review` | No critical or high findings, but at least one **review** finding |
+| `pass_automated` | No critical, high or review findings |
+
+`high` (v1.2) fails a draft exactly like `critical`. It marks findings that rest on a rougher heuristic (who performs a step), so reviewers can read them after the critical ones.
 
 `pass_automated` means *no rule fired*. It does **not** mean safe or approved. Every status leads to human review. The approval decision is recorded separately, in `review_history`.
 
@@ -159,7 +173,7 @@ Rows where the two annotators disagree are excluded until they are resolved by d
 
 ## 7. Limitations (known, measured in EXP-001)
 
-1. **Lexical, not semantic.** v1.1 catches opposite words only if they are in the §2.5 list. Other meaning changes that keep the same words (for example "slowly" → "quickly", or "the operator" → "any person") are not detected. Correct paraphrases can be flagged as altered (`HARD-PARAPHRASE`, still a false alarm in v1.1, but one that errs on the safe side).
+1. **Lexical, not semantic.** v1.2 catches opposite words, quantifier and actor changes only for the words in its lists (§2.5, §2.6), and contradictions only when the draft step reuses the warning's verb and object words. Other meaning changes (for example "slowly" → "quickly", "any" → "most", or "raise the forks to inspect the chains" against "do not inspect the forklift with the forks raised") are not detected. The optional advisory semantic checker (`src/semantic_checker.py`, off by default) is the planned way to reach these. Correct paraphrases can be flagged as altered (`HARD-PARAPHRASE`, still a false alarm in v1.1, but one that errs on the safe side).
 2. **Units only from a fixed list.** Unlisted units and single-letter units (m, g, l, s) are not compared. A number written without a unit in the source cannot be checked for a unit change.
 3. **Structure-dependent.** Steps must be numbered lines. Tables, multi-column PDFs and scanned PDFs (no OCR) are not handled, and such cases produce `needs_review` findings rather than passes.
 4. **Dependencies are approximated by source order.** Every pair of source steps is treated as order-critical, which over-flags harmless reorderings of independent steps.

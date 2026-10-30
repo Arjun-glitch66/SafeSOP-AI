@@ -1035,7 +1035,9 @@ def evaluation_status():
         "evaluator_version": EVALUATOR_VERSION,
         "message": (
             "Every generated draft is automatically checked for warning preservation, "
-            "unsupported instructions and values, step order, and omitted, altered, "
-            "duplicated or conflicting steps. Automated checks are not safety approval."
+            "unsupported instructions and values, step order, omitted, altered, duplicated "
+            "or conflicting steps, steps that contradict a warning, weakened quantifiers, "
+            "changed actors and change requests that were not applied. Automated checks "
+            "are not safety approval."
         ),
     }

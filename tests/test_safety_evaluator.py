@@ -181,3 +181,107 @@ def test_degree_unit_change_is_flagged():
     changed = STEPS[:2] + ["Cool the casing to 40 °F, then drain it into the 20 litre waste container."]
     result = evaluate_revision(source, draft(*changed))
     assert any(f["type"] == "unsupported_value" and "40 fahrenheit" in f["values"] for f in result["findings"])
+
+
+# --- v1.2 rules ---
+
+from src.safety_evaluator import (  # noqa: E402
+    check_change_applied, parse_prohibition, same_word, tokens,
+)
+
+LOCK_SOURCE = SOURCE.replace(
+    "3. Drain the casing", "3. Each worker must apply a personal lock to the isolator.\n4. Drain the casing"
+).replace("1. Switch off", "1. Notify all operators, then switch off")
+LOCK_STEPS = [
+    "Notify all operators, then switch off the pump motor at the local isolator.",
+    STEPS[1],
+    "Each worker must apply a personal lock to the isolator.",
+    STEPS[2],
+]
+
+
+def findings_of(result, kind):
+    return [f for f in result["findings"] if f["type"] == kind]
+
+
+def test_v12_unchanged_lock_draft_passes():
+    result = evaluate_revision(LOCK_SOURCE, draft(*LOCK_STEPS))
+    assert result["status"] == "pass_automated", result["findings"]
+
+
+def test_safety_words_are_no_longer_stopwords():
+    assert {"all", "any", "each", "before", "after"} <= tokens("before any, after all, each")
+
+
+def test_inserted_step_doing_the_forbidden_action_contradicts_the_warning():
+    steps = STEPS[:2] + ["Open the pump casing while the motor is running to check the impeller."] + STEPS[2:]
+    result = evaluate_revision(SOURCE, draft(*steps))
+    [finding] = findings_of(result, "contradicts_warning")
+    assert result["status"] == "fail" and finding["severity"] == "critical"
+    assert finding["source"].startswith("WARNING: Never open the pump casing")
+    assert (finding["source_line"], finding["draft_line"]) == (3, 5)  # quoted evidence is located
+
+
+def test_no_contradiction_when_condition_absent_or_step_negated():
+    for extra in ("Open the pump casing after the motor has stopped.",
+                  "Do not open the pump casing while the motor is running."):
+        steps = STEPS + [extra]
+        assert not findings_of(evaluate_revision(SOURCE, draft(*steps)), "contradicts_warning"), extra
+
+
+def test_parse_prohibition_and_stem_match():
+    assert parse_prohibition("DANGER: Do not bypass the emergency stop circuit for any reason.") == (
+        "bypass", {"emergency", "stop", "circuit"}, set())
+    verb, action, condition = parse_prohibition("Never open the lid while the rotor is spinning.")
+    assert (verb, action, condition) == ("open", {"lid"}, {"while", "rotor", "spinning"})
+    assert parse_prohibition("Wear gloves.") is None
+    assert same_word("bypass", "bypassing") and same_word("add", "adds") and not same_word("add", "address")
+
+
+def test_quantifier_weakening_fails_and_requested_one_is_review():
+    weakened = ["Notify most operators, then switch off the pump motor at the local isolator."] + LOCK_STEPS[1:]
+    [finding] = findings_of(evaluate_revision(LOCK_SOURCE, draft(*weakened)), "quantifier_weakened")
+    assert finding["severity"] == "critical" and finding["evidence"] == "'all' -> 'most'"
+    [requested] = findings_of(evaluate_revision(LOCK_SOURCE, draft(*weakened), "Only notify most operators."),
+                              "quantifier_weakened")
+    assert requested["severity"] == "review"
+
+
+def test_quantifier_strengthening_and_before_after_are_not_double_reported():
+    source = SOURCE.replace("1. Switch off", "1. Before any work, switch off")
+    stronger = ["Before all work, switch off the pump motor at the local isolator."] + STEPS[1:]
+    assert not findings_of(evaluate_revision(source, draft(*stronger)), "quantifier_weakened")
+    after = ["After any work, switch off the pump motor at the local isolator."] + STEPS[1:]
+    result = evaluate_revision(source, draft(*after))
+    assert findings_of(result, "conflicting_instruction") and not findings_of(result, "quantifier_weakened")
+
+
+def test_actor_change_on_lock_step_is_high_and_fails():
+    changed = LOCK_STEPS[:2] + ["The supervisor must apply a personal lock to the isolator."] + LOCK_STEPS[3:]
+    result = evaluate_revision(LOCK_SOURCE, draft(*changed))
+    [finding] = findings_of(result, "actor_changed")
+    assert finding["severity"] == "high" and finding["evidence"] == "worker -> supervisor"
+    assert result["status"] == "fail"
+
+
+def test_actor_change_outside_lock_steps_is_ignored():
+    source = SOURCE.replace("2. Close the inlet", "2. The operator closes the inlet")
+    changed = [STEPS[0], "The technician closes the inlet valve and the outlet valve.", STEPS[2]]
+    assert not findings_of(evaluate_revision(source, draft(*changed)), "actor_changed")
+
+
+def test_change_not_applied():
+    request = "Use the 35 litre waste container."
+    assert findings_of(evaluate_revision(SOURCE, draft(*STEPS), request), "change_not_applied")  # 35 missing
+    applied = STEPS[:2] + [STEPS[2].replace("20", "35")]
+    assert not findings_of(evaluate_revision(SOURCE, draft(*applied), request), "change_not_applied")
+    # A draft that equals the original fails even when the request has no new terms.
+    [identical] = check_change_applied("Tidy the wording.", SOURCE, SOURCE)
+    assert identical["detail"] == "The draft is identical to the original."
+
+
+def test_change_check_skips_removals_and_empty_requests():
+    removed = STEPS[:2]
+    request = "Remove the draining step because the casing is now drained automatically."
+    assert not findings_of(evaluate_revision(SOURCE, draft(*removed), request), "change_not_applied")
+    assert check_change_applied("", SOURCE, SOURCE) == []

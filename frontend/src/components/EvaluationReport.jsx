@@ -23,8 +23,9 @@ export default function EvaluationReport({ evaluation }) {
           <div className="row-main">
             <strong>{finding.type.replaceAll("_", " ")}</strong>
             <span>{finding.detail}</span>
-            {finding.source && <span>Source: <span className="quote">“{finding.source}”</span></span>}
-            {finding.draft && <span>Draft: <span className="quote">“{finding.draft}”</span></span>}
+            {finding.source && <span>Source{finding.source_line ? ` (line ${finding.source_line})` : ""}: <span className="quote">“{finding.source}”</span></span>}
+            {finding.draft && <span>Draft{finding.draft_line ? ` (line ${finding.draft_line})` : ""}: <span className="quote">“{finding.draft}”</span></span>}
+            {finding.evidence && <span>Evidence: {finding.evidence}</span>}
             {finding.values && <span>Values: {finding.values.join(", ")}</span>}
             {finding.pairs && <span>{finding.pairs.length} step pair(s) out of order, e.g. “{finding.pairs[0].before}” should come before “{finding.pairs[0].after}”</span>}
           </div>

@@ -7,6 +7,10 @@ const FRAMEWORK = [
   ["Unsupported instructions and values", "Draft steps must be supported by the source or the change request. New numbers, and known numbers with a different unit, are flagged.", "Critical"],
   ["Step-order integrity", "Share of source step pairs that keep their relative order in the draft.", "Critical"],
   ["Omitted, altered, duplicated and conflicting steps", "Source steps are matched to draft steps. Removed steps, wording changes, near-duplicates, negation flips and opposite words (on/off, open/close) are reported.", "High"],
+  ["Contradicted warnings", "Every draft step, including new ones, is compared with every source prohibition ('do not / never' + action). A step that performs the forbidden action fails.", "Critical"],
+  ["Weakened quantifiers and timing", "'all / every / each / always / before' replaced by 'some / most / a / after …' in a matched warning or step.", "Critical"],
+  ["Changed actor", "The person who applies a lock or tag, or verifies, changed (e.g. 'each worker' -> 'the supervisor').", "High"],
+  ["Change not applied", "The draft equals the original, or none of the change request's new values or terms appear in it.", "Critical"],
   ["Uncertain cases", "Borderline matches, missing sections or undetectable structure give 'needs review', never a pass.", "Review"],
 ];
 

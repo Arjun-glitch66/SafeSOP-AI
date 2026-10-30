@@ -22,7 +22,7 @@ from src.safety_evaluator import EVALUATOR_VERSION, evaluate_revision  # noqa: E
 
 TESTSET = ROOT / "evaluation" / "testset.json"
 RESULTS = ROOT / "results"
-COUNTED_SEVERITIES = {"critical", "review"}  # "info" findings are not counted as detections
+COUNTED_SEVERITIES = {"critical", "high", "review"}  # "info" findings are not counted as detections
 
 UNSUPPORTED_STEP = "Spray the surrounding floor with degreasing foam and wipe it dry."
 
