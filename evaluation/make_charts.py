@@ -15,7 +15,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS = ROOT / "results"
 OUT = RESULTS / "charts"
-VERSIONS = ["safe-sop-eval-1.0", "safe-sop-eval-1.1"]
+# (output file, [(results stem, legend label), (stem, label)], subtitle)
+CHARTS = [
+    ("exp001_accuracy_by_group.svg", [("safe-sop-eval-1.0", "v1.0"), ("safe-sop-eval-1.1", "v1.1")],
+     "EXP-001 · same 42 cases · held-out cases were written before v1.1"),
+    ("exp001c_accuracy_by_group.svg", [("safe-sop-eval-1.1_testset-v2", "v1.1"), ("safe-sop-eval-1.2", "v1.2")],
+     "EXP-001c · same 64 cases (test set v2) · held-out cases were written before the version targeting them"),
+]
 GROUP_LABELS = {"standard": "Standard defects", "hard-dev": "Hard cases (dev)", "hard-heldout": "Hard cases (held-out)"}
 
 # Light colours are written as attributes on every element (PDF converters and other
@@ -66,20 +72,20 @@ def x_grid(left, top, plot_width, bottom):
     return "".join(parts)
 
 
-def chart_by_group(runs):
+def chart_by_group(runs, series, subtitle):
     groups = ["standard", "hard-dev", "hard-heldout"]
     left, plot_width, top, bar_h, gap, group_gap = 170, 360, 96, 16, 2, 22
     height = top + len(groups) * (2 * bar_h + gap + group_gap) + 30
     parts = [
         # Legend: two series, also named in each bar's label, so identity is never colour alone.
-        f'<rect x="24" y="66" width="12" height="12" rx="3" class="s1"/><text x="42" y="76" class="ink2" font-size="12">v1.0</text>',
-        f'<rect x="84" y="66" width="12" height="12" rx="3" class="s2"/><text x="102" y="76" class="ink2" font-size="12">v1.1</text>',
+        f'<rect x="24" y="66" width="12" height="12" rx="3" class="s1"/><text x="42" y="76" class="ink2" font-size="12">{series[0][1]}</text>',
+        f'<rect x="84" y="66" width="12" height="12" rx="3" class="s2"/><text x="102" y="76" class="ink2" font-size="12">{series[1][1]}</text>',
         x_grid(left, top - 6, plot_width, height - 30),
     ]
     y = top
     for group in groups:
         parts.append(f'<text x="{left - 12}" y="{y + bar_h + 5}" class="ink" font-size="12" text-anchor="end">{GROUP_LABELS[group]}</text>')
-        for cls, version in (("s1", VERSIONS[0]), ("s2", VERSIONS[1])):
+        for cls, (version, _) in zip(("s1", "s2"), series):
             m = runs[version]["summary"]["per_group"][group]
             width = plot_width * m["accuracy"]
             label = f"{m['correct']}/{m['cases']}"
@@ -87,15 +93,15 @@ def chart_by_group(runs):
             parts.append(f'<text x="{left + width + 6}" y="{y + bar_h - 4}" class="ink2" font-size="11">{label}</text>')
             y += bar_h + gap
         y += group_gap
-    return frame(600, height, "Cases handled correctly, by case group",
-                 "EXP-001 · same 42 cases · held-out cases were written before v1.1", "".join(parts))
+    return frame(600, height, "Cases handled correctly, by case group", subtitle, "".join(parts))
 
 
 
 def main():
-    runs = {v: json.loads((RESULTS / f"evaluator_validation_{v}.json").read_text(encoding="utf-8")) for v in VERSIONS}
     OUT.mkdir(exist_ok=True)
-    (OUT / "exp001_accuracy_by_group.svg").write_text(chart_by_group(runs), encoding="utf-8")
+    for filename, series, subtitle in CHARTS:
+        runs = {v: json.loads((RESULTS / f"evaluator_validation_{v}.json").read_text(encoding="utf-8")) for v, _ in series}
+        (OUT / filename).write_text(chart_by_group(runs, series, subtitle), encoding="utf-8")
     print("written:", ", ".join(p.name for p in sorted(OUT.glob("*.svg"))))
 
 

@@ -1,8 +1,9 @@
 {
   "summary": {
     "experiment_id": "EXP-001",
-    "run_at": "2026-10-30 10:22",
+    "run_at": "2026-10-30 10:27",
     "evaluator_version": "safe-sop-eval-1.1",
+    "git_commit": "3b45546",
     "per_group": {
       "hard-dev": {
         "cases": 8,
@@ -26,91 +27,183 @@
         "fp": 0,
         "fn": 2,
         "precision": null,
-        "recall": 0.0
+        "recall": 0.0,
+        "precision_ci95": null,
+        "recall_ci95": [
+          0.0,
+          0.0
+        ]
       },
       "altered_step": {
         "tp": 1,
         "fp": 0,
         "fn": 0,
         "precision": 1.0,
-        "recall": 1.0
+        "recall": 1.0,
+        "precision_ci95": [
+          1.0,
+          1.0
+        ],
+        "recall_ci95": [
+          1.0,
+          1.0
+        ]
       },
       "altered_warning": {
         "tp": 1,
         "fp": 1,
         "fn": 0,
         "precision": 0.5,
-        "recall": 1.0
+        "recall": 1.0,
+        "precision_ci95": [
+          0.0,
+          1.0
+        ],
+        "recall_ci95": [
+          1.0,
+          1.0
+        ]
       },
       "change_not_applied": {
         "tp": 0,
         "fp": 0,
         "fn": 4,
         "precision": null,
-        "recall": 0.0
+        "recall": 0.0,
+        "precision_ci95": null,
+        "recall_ci95": [
+          0.0,
+          0.0
+        ]
       },
       "conflicting_instruction": {
         "tp": 9,
         "fp": 0,
         "fn": 0,
         "precision": 1.0,
-        "recall": 1.0
+        "recall": 1.0,
+        "precision_ci95": [
+          1.0,
+          1.0
+        ],
+        "recall_ci95": [
+          1.0,
+          1.0
+        ]
       },
       "contradicts_warning": {
         "tp": 0,
         "fp": 0,
         "fn": 6,
         "precision": null,
-        "recall": 0.0
+        "recall": 0.0,
+        "precision_ci95": null,
+        "recall_ci95": [
+          0.0,
+          0.0
+        ]
       },
       "duplicated_step": {
         "tp": 4,
         "fp": 0,
         "fn": 0,
         "precision": 1.0,
-        "recall": 1.0
+        "recall": 1.0,
+        "precision_ci95": [
+          1.0,
+          1.0
+        ],
+        "recall_ci95": [
+          1.0,
+          1.0
+        ]
       },
       "missing_warning": {
         "tp": 4,
         "fp": 0,
         "fn": 0,
         "precision": 1.0,
-        "recall": 1.0
+        "recall": 1.0,
+        "precision_ci95": [
+          1.0,
+          1.0
+        ],
+        "recall_ci95": [
+          1.0,
+          1.0
+        ]
       },
       "omitted_step": {
         "tp": 5,
         "fp": 0,
         "fn": 0,
         "precision": 1.0,
-        "recall": 1.0
+        "recall": 1.0,
+        "precision_ci95": [
+          1.0,
+          1.0
+        ],
+        "recall_ci95": [
+          1.0,
+          1.0
+        ]
       },
       "quantifier_weakened": {
         "tp": 0,
         "fp": 0,
         "fn": 5,
         "precision": null,
-        "recall": 0.0
+        "recall": 0.0,
+        "precision_ci95": null,
+        "recall_ci95": [
+          0.0,
+          0.0
+        ]
       },
       "step_order_violation": {
         "tp": 4,
         "fp": 0,
         "fn": 0,
         "precision": 1.0,
-        "recall": 1.0
+        "recall": 1.0,
+        "precision_ci95": [
+          1.0,
+          1.0
+        ],
+        "recall_ci95": [
+          1.0,
+          1.0
+        ]
       },
       "unsupported_instruction": {
         "tp": 4,
         "fp": 0,
         "fn": 0,
         "precision": 1.0,
-        "recall": 1.0
+        "recall": 1.0,
+        "precision_ci95": [
+          1.0,
+          1.0
+        ],
+        "recall_ci95": [
+          1.0,
+          1.0
+        ]
       },
       "unsupported_value": {
         "tp": 7,
         "fp": 0,
         "fn": 0,
         "precision": 1.0,
-        "recall": 1.0
+        "recall": 1.0,
+        "precision_ci95": [
+          1.0,
+          1.0
+        ],
+        "recall_ci95": [
+          1.0,
+          1.0
+        ]
       }
     },
     "cases": 64,
@@ -135,7 +228,131 @@
       "SOP-FORK/HARD-ANY-TO-MOST"
     ],
     "clean_cases": 11,
-    "clean_false_alarm_rate": 0.091
+    "clean_false_alarm_rate": 0.091,
+    "heldout": {
+      "per_group": {
+        "hard-heldout": {
+          "cases": 24,
+          "correct": 12,
+          "accuracy": 0.5
+        }
+      },
+      "per_type": {
+        "actor_changed": {
+          "tp": 0,
+          "fp": 0,
+          "fn": 1,
+          "precision": null,
+          "recall": 0.0,
+          "precision_ci95": null,
+          "recall_ci95": [
+            0.0,
+            0.0
+          ]
+        },
+        "altered_step": {
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "precision_ci95": [
+            1.0,
+            1.0
+          ],
+          "recall_ci95": [
+            1.0,
+            1.0
+          ]
+        },
+        "change_not_applied": {
+          "tp": 0,
+          "fp": 0,
+          "fn": 3,
+          "precision": null,
+          "recall": 0.0,
+          "precision_ci95": null,
+          "recall_ci95": [
+            0.0,
+            0.0
+          ]
+        },
+        "conflicting_instruction": {
+          "tp": 4,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "precision_ci95": [
+            1.0,
+            1.0
+          ],
+          "recall_ci95": [
+            1.0,
+            1.0
+          ]
+        },
+        "contradicts_warning": {
+          "tp": 0,
+          "fp": 0,
+          "fn": 5,
+          "precision": null,
+          "recall": 0.0,
+          "precision_ci95": null,
+          "recall_ci95": [
+            0.0,
+            0.0
+          ]
+        },
+        "quantifier_weakened": {
+          "tp": 0,
+          "fp": 0,
+          "fn": 3,
+          "precision": null,
+          "recall": 0.0,
+          "precision_ci95": null,
+          "recall_ci95": [
+            0.0,
+            0.0
+          ]
+        },
+        "unsupported_value": {
+          "tp": 2,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "precision_ci95": [
+            1.0,
+            1.0
+          ],
+          "recall_ci95": [
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "cases": 24,
+      "status_accuracy": 0.5,
+      "exact_type_match_rate": 0.5,
+      "defect_cases": 18,
+      "defect_cases_flagged": 0.389,
+      "defect_cases_missed": [
+        "SOP-CONV/HARD-INSERT-REACH",
+        "SOP-CONV/HARD-ALL-TO-SOME",
+        "SOP-ACID/HARD-INSERT-WATER",
+        "SOP-ACID/HARD-CHANGE-IGNORED",
+        "SOP-ACID/HARD-CHANGE-DROPPED-VALUE",
+        "SOP-CENT/HARD-EVERY-TO-SOME",
+        "SOP-CENT/HARD-INSERT-OPEN-LID",
+        "SOP-FORK/HARD-INSERT-FORKS-RAISED",
+        "SOP-FORK/HARD-INSERT-OPERATE-FAILED",
+        "SOP-FORK/HARD-CHANGE-IGNORED",
+        "SOP-FORK/HARD-ANY-TO-MOST"
+      ],
+      "clean_cases": 6,
+      "clean_false_alarm_rate": 0.0
+    }
   },
   "cases": [
     {

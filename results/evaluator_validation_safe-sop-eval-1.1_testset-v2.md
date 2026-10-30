@@ -1,7 +1,7 @@
 # EXP-001 — Evaluator validation on injected defects
 
-- Date (UTC): 2026-10-30 10:22
-- Evaluator: `safe-sop-eval-1.1`
+- Date (UTC): 2026-10-30 10:27
+- Evaluator: `safe-sop-eval-1.1` (git `3b45546`)
 - Test set: `evaluation/testset.json` — 64 cases (53 with a defect, 11 without)
 - Generator: none. Drafts are built from the test set, so ground truth is exact.
 
@@ -17,7 +17,7 @@
 
 ## By case group
 
-`hard-dev` cases were known while designing the current rules; `hard-heldout` cases were written before evaluator v1.1 existed and were not used to tune it.
+`hard-dev` cases were known while designing the current rules; `hard-heldout` cases were written before the evaluator version that first targets them (v1.1 or v1.2) and were not used to tune it. They were written by the same author as the rules, so they are held out from tuning, not independent.
 
 | Group | Cases | Correct | Accuracy |
 |---|---|---|---|
@@ -27,21 +27,46 @@
 
 ## Per finding type
 
-| Finding type | TP | FP | FN | Precision | Recall |
+Counted per case (a type is detected or not in each case). 95% intervals: percentile bootstrap over cases, 2000 resamples. Cases built from the same SOP are not independent, so the intervals are optimistic (too narrow). With only a few cases of a type, the interval collapses to a point when every case agrees (for example 2/2 gives [1.0, 1.0]); read that as 'too few cases to estimate', not as certainty.
+
+| Finding type | TP | FP | FN | Precision [95% CI] | Recall [95% CI] |
 |---|---|---|---|---|---|
-| actor_changed | 0 | 0 | 2 | n/a | 0.0 |
-| altered_step | 1 | 0 | 0 | 1.0 | 1.0 |
-| altered_warning | 1 | 1 | 0 | 0.5 | 1.0 |
-| change_not_applied | 0 | 0 | 4 | n/a | 0.0 |
-| conflicting_instruction | 9 | 0 | 0 | 1.0 | 1.0 |
-| contradicts_warning | 0 | 0 | 6 | n/a | 0.0 |
-| duplicated_step | 4 | 0 | 0 | 1.0 | 1.0 |
-| missing_warning | 4 | 0 | 0 | 1.0 | 1.0 |
-| omitted_step | 5 | 0 | 0 | 1.0 | 1.0 |
-| quantifier_weakened | 0 | 0 | 5 | n/a | 0.0 |
-| step_order_violation | 4 | 0 | 0 | 1.0 | 1.0 |
-| unsupported_instruction | 4 | 0 | 0 | 1.0 | 1.0 |
-| unsupported_value | 7 | 0 | 0 | 1.0 | 1.0 |
+| actor_changed | 0 | 0 | 2 | n/a | 0.0 [0.0, 0.0] |
+| altered_step | 1 | 0 | 0 | 1.0 [1.0, 1.0] | 1.0 [1.0, 1.0] |
+| altered_warning | 1 | 1 | 0 | 0.5 [0.0, 1.0] | 1.0 [1.0, 1.0] |
+| change_not_applied | 0 | 0 | 4 | n/a | 0.0 [0.0, 0.0] |
+| conflicting_instruction | 9 | 0 | 0 | 1.0 [1.0, 1.0] | 1.0 [1.0, 1.0] |
+| contradicts_warning | 0 | 0 | 6 | n/a | 0.0 [0.0, 0.0] |
+| duplicated_step | 4 | 0 | 0 | 1.0 [1.0, 1.0] | 1.0 [1.0, 1.0] |
+| missing_warning | 4 | 0 | 0 | 1.0 [1.0, 1.0] | 1.0 [1.0, 1.0] |
+| omitted_step | 5 | 0 | 0 | 1.0 [1.0, 1.0] | 1.0 [1.0, 1.0] |
+| quantifier_weakened | 0 | 0 | 5 | n/a | 0.0 [0.0, 0.0] |
+| step_order_violation | 4 | 0 | 0 | 1.0 [1.0, 1.0] | 1.0 [1.0, 1.0] |
+| unsupported_instruction | 4 | 0 | 0 | 1.0 [1.0, 1.0] | 1.0 [1.0, 1.0] |
+| unsupported_value | 7 | 0 | 0 | 1.0 [1.0, 1.0] | 1.0 [1.0, 1.0] |
+
+## Held-out cases only
+
+Cases in group `hard-heldout` (not used to design or tune the current rules). The 'should pass' held-out cases are included, so false alarms count here too.
+
+| Metric | Value |
+|---|---|
+| Cases | 24 |
+| Status accuracy | 0.5 |
+| Exact finding-type match | 0.5 |
+| Defect cases flagged | 0.389 |
+| False alarms on should-pass cases | 0.0 |
+| Defect cases missed entirely | SOP-CONV/HARD-INSERT-REACH, SOP-CONV/HARD-ALL-TO-SOME, SOP-ACID/HARD-INSERT-WATER, SOP-ACID/HARD-CHANGE-IGNORED, SOP-ACID/HARD-CHANGE-DROPPED-VALUE, SOP-CENT/HARD-EVERY-TO-SOME, SOP-CENT/HARD-INSERT-OPEN-LID, SOP-FORK/HARD-INSERT-FORKS-RAISED, SOP-FORK/HARD-INSERT-OPERATE-FAILED, SOP-FORK/HARD-CHANGE-IGNORED, SOP-FORK/HARD-ANY-TO-MOST |
+
+| Finding type | TP | FP | FN | Precision [95% CI] | Recall [95% CI] |
+|---|---|---|---|---|---|
+| actor_changed | 0 | 0 | 1 | n/a | 0.0 [0.0, 0.0] |
+| altered_step | 1 | 0 | 0 | 1.0 [1.0, 1.0] | 1.0 [1.0, 1.0] |
+| change_not_applied | 0 | 0 | 3 | n/a | 0.0 [0.0, 0.0] |
+| conflicting_instruction | 4 | 0 | 0 | 1.0 [1.0, 1.0] | 1.0 [1.0, 1.0] |
+| contradicts_warning | 0 | 0 | 5 | n/a | 0.0 [0.0, 0.0] |
+| quantifier_weakened | 0 | 0 | 3 | n/a | 0.0 [0.0, 0.0] |
+| unsupported_value | 2 | 0 | 0 | 1.0 [1.0, 1.0] | 1.0 [1.0, 1.0] |
 
 ## All cases
 
