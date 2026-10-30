@@ -11,7 +11,7 @@ import re
 import sqlite3
 from datetime import datetime, timezone
 
-from sqlalchemy import create_engine, event, inspect, text
+from sqlalchemy import Engine, create_engine, event, inspect, text
 from sqlalchemy.pool import NullPool
 
 from app import config
@@ -19,7 +19,7 @@ from app import config
 logger = logging.getLogger("safesop")
 
 WRITE_LOCK_KEY = 7262_0001  # pg_advisory_xact_lock key shared by every audited writer
-_engines = {}
+_engines: dict[str, Engine] = {}
 
 
 def now():

@@ -42,6 +42,7 @@ export default function DocumentPage() {
           <div><dt>Review status</dt><dd>{statusLabel(latest?.status)}</dd></div>
           <div><dt>Versions</dt><dd>{versions.data?.length ?? "…"}</dd></div>
           <div><dt>Pages</dt><dd>{doc?.page_count ?? "Unknown"}</dd></div>
+          <div><dt>Checklist</dt><dd>{doc?.document_type ? doc.document_type.replaceAll("_", " ") : "None"}</dd></div>
         </dl>
       </section>
 

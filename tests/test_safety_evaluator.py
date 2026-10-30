@@ -1,10 +1,10 @@
 
 from src.safety_evaluator import (
-    warning_recall,
-    warning_precision,
-    unsupported_instruction_rate,
-    order_integrity,
     evaluate_sop,
+    order_integrity,
+    unsupported_instruction_rate,
+    warning_precision,
+    warning_recall,
 )
 
 
@@ -138,7 +138,8 @@ def test_validation_set_standard_cases_all_correct():
     """Regression guard: every non-hard case in evaluation/testset.json must stay correct."""
     import json
     from pathlib import Path
-    from evaluation.validate_evaluator import build_cases, COUNTED_SEVERITIES
+
+    from evaluation.validate_evaluator import COUNTED_SEVERITIES, build_cases
 
     testset = json.loads((Path(__file__).resolve().parents[1] / "evaluation" / "testset.json").read_text())
     for case in build_cases(testset):
@@ -186,7 +187,10 @@ def test_degree_unit_change_is_flagged():
 # --- v1.2 rules ---
 
 from src.safety_evaluator import (  # noqa: E402
-    check_change_applied, parse_prohibition, same_word, tokens,
+    check_change_applied,
+    parse_prohibition,
+    same_word,
+    tokens,
 )
 
 LOCK_SOURCE = SOURCE.replace(

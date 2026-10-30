@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pymupdf
 
-
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 ORIGINALS_DIR = PROJECT_DIR / "data" / "originals"
 GENERATED_DIR = PROJECT_DIR / "data" / "generated"

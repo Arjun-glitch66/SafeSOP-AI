@@ -12,3 +12,4 @@ PyJWT==2.15.1
 sqlalchemy==2.1.4
 alembic==1.20.0
 psycopg[binary]==3.3.6
+PyYAML==6.0.3

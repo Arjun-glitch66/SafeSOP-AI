@@ -2,6 +2,7 @@
 Run: python scripts/check_gemini.py. Not a test; pytest never collects it."""
 
 import os
+
 from dotenv import load_dotenv
 from google import genai
 

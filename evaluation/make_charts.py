@@ -85,7 +85,7 @@ def chart_by_group(runs, series, subtitle):
     y = top
     for group in groups:
         parts.append(f'<text x="{left - 12}" y="{y + bar_h + 5}" class="ink" font-size="12" text-anchor="end">{GROUP_LABELS[group]}</text>')
-        for cls, (version, _) in zip(("s1", "s2"), series):
+        for cls, (version, _) in zip(("s1", "s2"), series, strict=True):
             m = runs[version]["summary"]["per_group"][group]
             width = plot_width * m["accuracy"]
             label = f"{m['correct']}/{m['cases']}"

@@ -2,6 +2,8 @@
 import os
 import re
 
+from src.checklists import check_required_elements
+
 
 def normalize_text(text):
     """Normalize text for simple, case-insensitive comparison."""
@@ -549,7 +551,7 @@ def line_number(lines, text):
     return None
 
 
-def evaluate_revision(original_text, generated_text, change_request=""):
+def evaluate_revision(original_text, generated_text, change_request="", document_type=None):
     """
     Automated checks of a generated draft against the original SOP.
     Returns status 'fail', 'needs_review' or 'pass_automated'. None of these
@@ -670,7 +672,7 @@ def evaluate_revision(original_text, generated_text, change_request=""):
 
     # 5. Unsupported instructions and values
     unsupported = 0
-    for step, step_tokens in zip(draft_steps, draft_step_tokens):
+    for step, step_tokens in zip(draft_steps, draft_step_tokens, strict=True):
         support = max(
             (containment(step_tokens, line_tokens | change_tokens) for line_tokens in source_line_tokens),
             default=containment(step_tokens, change_tokens),
@@ -726,6 +728,10 @@ def evaluate_revision(original_text, generated_text, change_request=""):
         "change_applied": not any(f["type"] == "change_not_applied" for f in findings) if change_request.strip() else None,
     }
 
+    # 7. Required elements for this SOP type (src/checklists/*.yaml), if a type was given
+    checklist_findings, metrics["required_elements"] = check_required_elements(document_type, original_lines, draft_lines)
+    findings += checklist_findings
+
     for finding in findings:  # line numbers let the UI jump from a finding to the comparison
         finding.setdefault("source_line", line_number(original_lines, finding.get("source")))
         finding.setdefault("draft_line", line_number(draft_lines, finding.get("draft")))
@@ -750,7 +756,7 @@ def evaluate_revision(original_text, generated_text, change_request=""):
 STRUCTURED_SUFFIX = "+structured"
 
 
-def evaluate_structured_revision(original_text, generated_text, structured, change_request=""):
+def evaluate_structured_revision(original_text, generated_text, structured, change_request="", document_type=None):
     """
     Checks for a prompt-v3 draft, which cites source ids (S1.., W1..) on every step and warning.
     Matching uses those ids, not text similarity. The model's own labels are not trusted:
@@ -942,6 +948,9 @@ def evaluate_structured_revision(original_text, generated_text, structured, chan
         "actor_changes": sum(f["type"] == "actor_changed" for f in findings),
         "change_applied": not any(f["type"] == "change_not_applied" for f in findings) if change_request.strip() else None,
     }
+    checklist_findings, metrics["required_elements"] = check_required_elements(document_type, original_lines, draft_lines)
+    for item in checklist_findings:
+        add(item)
 
     severities = {f["severity"] for f in findings}
     status = ("fail" if severities & FAILING_SEVERITIES

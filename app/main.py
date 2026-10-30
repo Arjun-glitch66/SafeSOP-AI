@@ -10,8 +10,8 @@ from app import config
 from app.auth import current_user, seed_admin
 from app.db import init_db
 from app.logging_setup import configure_logging
-from app.services import jobs
 from app.routers import audit, auth, documents, health, requests, reviews, versions
+from app.services import jobs
 
 configure_logging()
 logger = logging.getLogger("safesop")

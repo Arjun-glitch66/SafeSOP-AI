@@ -5,8 +5,8 @@ from fastapi import APIRouter, Depends, Form, HTTPException
 
 from app import config
 from app.auth import require_role
-from app.pagination import page_params, paginate
 from app.db import connect_db, now
+from app.pagination import page_params, paginate
 
 router = APIRouter()
 

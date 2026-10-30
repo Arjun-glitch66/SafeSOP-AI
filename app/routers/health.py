@@ -6,7 +6,6 @@ from fastapi.responses import JSONResponse
 
 from app import config
 from app.db import connect_db
-
 from src.safety_evaluator import EVALUATOR_VERSION
 
 router = APIRouter()

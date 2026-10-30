@@ -1,0 +1,28 @@
+# Tool configuration only (the app is not packaged). Dependencies: requirements*.txt.
+
+[tool.ruff]
+line-length = 120
+target-version = "py314"
+extend-exclude = ["legacy"]
+
+[tool.ruff.lint]
+# Errors, pyflakes, import order and likely bugs. Style beyond that is not enforced.
+select = ["E4", "E7", "E9", "F", "I", "B"]
+ignore = ["B008"]  # FastAPI's Depends()/Form() defaults are the intended pattern
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "src", "evaluation", "api"]
+
+[tool.mypy]
+# Lenient on purpose: catch real type errors in app/ and src/ without annotating everything.
+python_version = "3.14"
+files = ["app", "src"]
+ignore_missing_imports = true
+check_untyped_defs = false
+warn_unused_ignores = true
+
+# pytest settings stay in pytest.ini (testpaths = tests).
+
+[tool.coverage.run]
+source = ["app", "src", "evaluation"]
+omit = ["evaluation/run_generation_experiment.py", "evaluation/make_charts.py"]

@@ -33,3 +33,6 @@ frontend/dist/
 # Local tool state (gstack browser/agent)
 .gstack/
 !.env.example
+frontend/coverage/
+coverage.xml
+.coverage

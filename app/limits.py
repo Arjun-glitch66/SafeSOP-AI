@@ -14,7 +14,7 @@ from fastapi import HTTPException
 from app import config
 from app.db import connect_db
 
-_recent = defaultdict(deque)  # username -> monotonic times of recent /generate calls
+_recent: defaultdict[str, deque[float]] = defaultdict(deque)  # username -> monotonic times of recent /generate calls
 _lock = threading.Lock()
 
 

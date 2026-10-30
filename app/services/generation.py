@@ -118,7 +118,8 @@ def prepare_generation(document_id, description, scope, target_page, parent_vers
             )
 
     return {
-        "document_id": document_id, "filename": document["filename"], "description": description, "scope": scope,
+        "document_id": document_id, "filename": document["filename"], "document_type": document["document_type"],
+        "description": description, "scope": scope,
         "original_text": original_text, "resolved_page": resolved_page, "parent_version_id": parent_version_id or None,
         "request_id": request_id, "review_feedback": review_feedback, "created_by": created_by,
     }
@@ -197,7 +198,7 @@ def run_generation(prepared, progress=lambda stage: None):
 
     progress("evaluating")
     evaluation = run_and_save_evaluation(version_id, original_text, generated_text, description,
-                                         result.get("structured"), resolved_page)
+                                         result.get("structured"), resolved_page, prepared["document_type"])
 
     return {
         "id": version_id,

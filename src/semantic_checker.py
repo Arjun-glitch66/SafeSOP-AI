@@ -67,7 +67,7 @@ class NliBackend:
         pairs = [(o, d) for o in original_items for d in draft_items]
         scores = model.predict(pairs, apply_softmax=True)
         return [(o, d, row[contradiction], f"NLI contradiction probability {row[contradiction]:.2f}")
-                for (o, d), row in zip(pairs, scores) if row[contradiction] >= self.threshold]
+                for (o, d), row in zip(pairs, scores, strict=True) if row[contradiction] >= self.threshold]
 
 
 @lru_cache(maxsize=2)

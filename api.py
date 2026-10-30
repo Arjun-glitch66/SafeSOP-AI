@@ -9,8 +9,8 @@ import sys
 import types
 
 from app import audit, auth, config, db, limits, main, schemas, storage
-from app.routers import documents, health, requests, reviews, versions
 from app.routers import auth as auth_router
+from app.routers import documents, health, requests, reviews, versions
 from app.services import evaluation, generation, jobs, pdf
 
 # Search order. Each name the tests touch is defined in exactly one of these modules.

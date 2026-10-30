@@ -1,0 +1,42 @@
+id: osha_operating_procedure
+name: Process safety operating procedure (OSHA 1910.119(f)-style)
+reference: >-
+  Items an operating procedure must address, paraphrased from OSHA 29 CFR 1910.119(f)(1)
+  (US federal regulation, public domain). Not legal advice; a qualified person decides what applies.
+elements:
+  - id: initial_startup
+    name: Initial startup
+    patterns: ['\binitial start-?up\b', '\bfirst start-?up\b']
+  - id: normal_operations
+    name: Normal operations
+    patterns: ['\bnormal operations?\b']
+  - id: temporary_operations
+    name: Temporary operations
+    patterns: ['\btemporary operations?\b']
+  - id: emergency_shutdown
+    name: Emergency shutdown, including when it is required and who may do it
+    patterns: ['\bemergency shut ?-?down\b', '\be-?stop\b', '\bemergency stop\b']
+  - id: emergency_operations
+    name: Emergency operations
+    patterns: ['\bemergency operations?\b']
+  - id: normal_shutdown
+    name: Normal shutdown
+    patterns: ['\bnormal shut ?-?down\b']
+  - id: startup_after_turnaround
+    name: Startup after a turnaround or an emergency shutdown
+    patterns: ['\bstart-?up (after|following)\b.*\b(turnaround|emergency|shut ?-?down)\b']
+  - id: operating_limits
+    name: Operating limits, consequences of deviation, and steps to correct or avoid it
+    patterns: ['\boperating limits?\b', '\bconsequences? of deviation\b', '\b(safe )?upper (and|or) lower limits?\b']
+  - id: chemical_hazards
+    name: Properties and hazards of the chemicals used
+    patterns: ['\b(properties|hazards?) of (the )?chemicals?\b', '\bsafety data sheets?\b', '\bSDS\b']
+  - id: exposure_precautions
+    name: Precautions against exposure (engineering and administrative controls, PPE)
+    patterns: ['\bpersonal protective equipment\b', '\bPPE\b', '\bengineering controls?\b', '\badministrative controls?\b']
+  - id: exposure_response
+    name: Control measures if physical contact or airborne exposure occurs
+    patterns: ['\b(if|in case of|after) (skin |eye )?(contact|exposure)\b', '\bexposure occurs?\b']
+  - id: safety_systems
+    name: Safety systems and their functions
+    patterns: ['\bsafety systems?\b', '\binterlocks?\b', '\brelief valves?\b']

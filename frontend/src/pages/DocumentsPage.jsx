@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { CloudUpload, FileText, FolderOpen, Search, Upload } from "lucide-react";
-import { getDocuments, uploadDocument } from "../api.js";
+import { getChecklists, getDocuments, uploadDocument } from "../api.js";
 import { EmptyState } from "../components/ui.jsx";
 import { useAuth, useBackend, useNotice, useResource, useTitle } from "../state.jsx";
 
@@ -12,6 +12,8 @@ export default function DocumentsPage() {
   const { show } = useNotice();
   const navigate = useNavigate();
   const documents = useResource(getDocuments, [online]);
+  const checklists = useResource(getChecklists, [online]);
+  const [documentType, setDocumentType] = useState("");
   const [query, setQuery] = useState("");
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -27,7 +29,7 @@ export default function DocumentsPage() {
     }
     setUploading(true);
     try {
-      const saved = await uploadDocument(selected);
+      const saved = await uploadDocument(selected, documentType);
       show("PDF uploaded. The original is stored unchanged.");
       navigate(`/documents/${saved.id}`);
     } catch (error) {
@@ -46,6 +48,14 @@ export default function DocumentsPage() {
         <div><h1>Documents</h1><p>Upload the source SOP first. The original PDF is stored as-is and never overwritten.</p></div>
         {can("author") && <button className="btn btn-primary" onClick={() => fileInput.current?.click()} disabled={!canUpload}><Upload size={16} /> {uploading ? "Uploading..." : "Upload document"}</button>}
       </div>
+
+      {can("author") && <div className="type-picker">
+        <label className="field-label" htmlFor="document-type">SOP type (adds a required-element checklist)</label>
+        <select id="document-type" className="form-input" value={documentType} onChange={(event) => setDocumentType(event.target.value)}>
+          <option value="">General (no checklist)</option>
+          {(checklists.data || []).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+        </select>
+      </div>}
 
       {can("author") && <div className={`upload-zone ${dragging ? "dragging" : ""}`}
         onDragOver={(event) => { event.preventDefault(); setDragging(true); }}

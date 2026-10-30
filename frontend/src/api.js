@@ -80,7 +80,9 @@ export const getEvaluationStatus = () => request("/api/evaluation/status", { aut
 // ---- documents ----
 export const getDocuments = async () => (await request("/api/documents")).documents;
 export const getDocument = (documentId) => request(`/api/documents/${id(documentId)}`);
-export const uploadDocument = (file) => request("/api/documents/upload", { method: "POST", body: form({ file }) });
+export const uploadDocument = (file, documentType = "") =>
+  request("/api/documents/upload", { method: "POST", body: form({ file, document_type: documentType }) });
+export const getChecklists = async () => (await request("/api/checklists")).checklists;
 export const getDocumentVersions = async (documentId) =>
   (await request(`/api/documents/${id(documentId)}/versions`)).versions;
 

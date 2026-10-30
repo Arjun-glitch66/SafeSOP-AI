@@ -516,7 +516,7 @@ def test_audited_actions_form_a_verifiable_chain(client):
                                                                     "version_rejected"]
     assert (events[0]["user"], events[4]["user"], events[6]["user"]) == ("system", "alice", "rita")
     assert events[4]["payload"]["sha256"] == original_hash(doc_id)
-    assert all(e["prev_hash"] == previous["hash"] for previous, e in zip(events, events[1:]))
+    assert all(e["prev_hash"] == previous["hash"] for previous, e in zip(events, events[1:], strict=False))
     assert client.get("/api/audit/verify").json() == {"ok": True, "events": 7, "broken_at": None,
                                                       "head": events[-1]["hash"]}
     assert client.get("/api/audit").status_code == 403  # the event list is admin-only
@@ -618,6 +618,7 @@ def test_reviewers_label_findings_and_can_change_their_mind(client):
 
 def test_finding_feedback_export_makes_benchmark_rows(client, tmp_path):
     import csv
+
     from evaluation.export_finding_feedback import export
     doc_id = upload_two_page_pdf(client)
     version = generate(client, doc_id, description="use torque 20Nm").json()
@@ -777,8 +778,21 @@ def test_list_endpoints_are_paged(client):
 
 def test_json_log_lines_carry_extra_fields():
     import logging
+
     from app.logging_setup import JsonFormatter
     record = logging.LogRecord("safesop.access", logging.INFO, "", 0, "request", (), None)
     record.path, record.status = "/api/documents", 200
     line = json.loads(JsonFormatter().format(record))
     assert (line["message"], line["path"], line["status"], line["level"]) == ("request", "/api/documents", 200, "INFO")
+
+
+def test_document_type_at_upload_selects_the_checklist(client):
+    assert any(c["id"] == "lockout_tagout" for c in client.get("/api/checklists").json()["checklists"])
+    pdf = pymupdf.open()
+    pdf.new_page().insert_text((72, 72), "1. Release stored energy from the spring.")
+    files = {"file": ("loto.pdf", pdf.tobytes(), "application/pdf")}
+    assert client.post("/api/documents/upload", files=files, data={"document_type": "nonsense"}).status_code == 400
+    doc_id = client.post("/api/documents/upload", files=files, data={"document_type": "lockout_tagout"}).json()["id"]
+    assert client.get(f"/api/documents/{doc_id}").json()["document_type"] == "lockout_tagout"
+    evaluation = generate(client, doc_id, description="x").json()["safety_evaluation"]
+    assert any(f["type"] == "missing_required_element" for f in evaluation["findings"])  # stub draft drops it

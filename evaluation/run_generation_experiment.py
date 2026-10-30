@@ -33,8 +33,15 @@ sys.path.insert(0, str(ROOT))
 
 from evaluation.validate_evaluator import TESTSET, render_sop  # noqa: E402
 from src.safety_evaluator import (  # noqa: E402
-    EVALUATOR_VERSION, PARTIAL_THRESHOLD, best_match, dice, evaluate_revision, extract_draft_section,
-    extract_steps, extract_warnings, tokens,
+    EVALUATOR_VERSION,
+    PARTIAL_THRESHOLD,
+    best_match,
+    dice,
+    evaluate_revision,
+    extract_draft_section,
+    extract_steps,
+    extract_warnings,
+    tokens,
 )
 from src.sop_generator import PROMPT_VERSION, generate_sop  # noqa: E402
 

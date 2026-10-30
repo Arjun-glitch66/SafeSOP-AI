@@ -5,15 +5,16 @@ import uuid
 from pathlib import Path
 
 import pymupdf
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 from app import config
 from app.audit import append_audit
 from app.auth import require_role
+from app.db import connect_db, now
 from app.pagination import page_params, paginate
 from app.storage import resolve, to_stored_path
-from app.db import connect_db, now
+from src.checklists import available_types
 
 logger = logging.getLogger("safesop")
 router = APIRouter()
@@ -23,7 +24,7 @@ router = APIRouter()
 def list_documents(page=Depends(page_params)):
     with connect_db() as connection:
         return paginate(connection, """
-            SELECT d.id, d.filename, d.sha256, d.size_bytes, d.created_at,
+            SELECT d.id, d.filename, d.sha256, d.size_bytes, d.created_at, d.document_type,
                    (SELECT COUNT(*) FROM versions v
                     WHERE v.document_id = d.id) AS version_count
             FROM documents d
@@ -32,8 +33,12 @@ def list_documents(page=Depends(page_params)):
 
 
 @router.post("/api/documents/upload")
-async def upload_document(file: UploadFile = File(...), user=Depends(require_role("author"))):
+async def upload_document(file: UploadFile = File(...), document_type: str = Form(""),
+                          user=Depends(require_role("author"))):
     filename = Path(file.filename or "").name.strip()
+    doc_type = document_type.strip() or None
+    if doc_type and doc_type not in {pack["id"] for pack in available_types()}:
+        raise HTTPException(status_code=400, detail=f"Unknown document type '{doc_type}'. See GET /api/checklists.")
 
     if not filename:
         raise HTTPException(status_code=400, detail="Please choose a file.")
@@ -84,8 +89,8 @@ async def upload_document(file: UploadFile = File(...), user=Depends(require_rol
             connection.execute(
                 """
                 INSERT INTO documents
-                    (id, filename, stored_path, sha256, size_bytes, created_at, page_count)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (id, filename, stored_path, sha256, size_bytes, created_at, page_count, document_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     document_id,
@@ -95,15 +100,18 @@ async def upload_document(file: UploadFile = File(...), user=Depends(require_rol
                     size,
                     created,
                     page_count,
+                    doc_type,
                 ),
             )
             append_audit(connection, user["username"], "document_uploaded", "document", document_id,
-                         {"filename": filename, "sha256": file_hash, "size_bytes": size, "page_count": page_count})
+                         {"filename": filename, "sha256": file_hash, "size_bytes": size, "page_count": page_count,
+                          "document_type": doc_type})
 
         logger.info("Uploaded PDF %s (%s bytes)", filename, size)
         return {
             "id": document_id,
             "filename": filename,
+            "document_type": doc_type,
             "sha256": file_hash,
             "size_bytes": size,
             "created_at": created,
@@ -132,7 +140,7 @@ def get_document(document_id: str):
     with connect_db() as connection:
         row = connection.execute(
             """
-            SELECT id, filename, stored_path, sha256, size_bytes, created_at, page_count
+            SELECT id, filename, stored_path, sha256, size_bytes, created_at, page_count, document_type
             FROM documents WHERE id = ?
             """,
             (document_id,),
@@ -174,3 +182,9 @@ def download_original(document_id: str):
         media_type="application/pdf",
         filename=row["filename"],
     )
+
+
+@router.get("/api/checklists")
+def list_checklists():
+    """SOP types with a required-element checklist; pass one as document_type at upload."""
+    return {"checklists": available_types()}

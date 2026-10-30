@@ -1,0 +1,45 @@
+id: lockout_tagout
+name: Lockout/tagout (energy isolation)
+reference: >-
+  Steps of an energy control procedure, paraphrased from OSHA 29 CFR 1910.147(c)(4) and (d)-(e)
+  (US federal regulation, public domain). Not legal advice; a qualified person decides what applies.
+# An element is present when any pattern matches a line (case-insensitive). Patterns are
+# deliberately broad: a missed element (false negative) is worse than a review prompt.
+elements:
+  - id: notify
+    name: Notify affected employees before shutdown
+    patterns:
+      - '\bnotif(y|ies|ied|ication)\b.*\b(affected|operators?|employees?|personnel|workers?)\b'
+      - '\binform\b.*\baffected\b'
+  - id: shutdown
+    name: Shut down the equipment by the normal stopping procedure
+    patterns:
+      - '\bshut ?down\b'
+      - '\bstop (the )?(conveyor|machine|equipment|motor|pump|line)\b'
+      - '\bnormal stop\b'
+  - id: isolation
+    name: Isolate every energy source
+    patterns:
+      - '\bisolat(e|es|ed|ing|ion|or)\b'
+      - '\bdisconnect\b'
+      - '\bde-?energi[sz]'
+      - '\bswitch(ed)? off\b.*\b(isolator|breaker|disconnect|supply|power)\b'
+  - id: apply_locks_tags
+    name: Apply lockout or tagout devices
+    patterns:
+      - '\b(apply|attach|affix|fit|place)\w*\b.*\b(lock|padlock|tag)s?\b'
+      - '\b(lock|tag)s? (is|are)? ?(applied|attached|affixed|fitted)\b'
+      - '\block(ed)? out\b'
+  - id: stored_energy
+    name: Release or restrain stored energy
+    patterns:
+      - '\b(stored|residual) energy\b'
+      - '\b(bleed|release|dissipat|discharg|vent|block)\w*\b.*\b(pressure|energy|spring|capacitors?|tension(er)?|hydraulic|pneumatic)\b'
+  - id: verification
+    name: Verify isolation before work starts
+    patterns:
+      - '\b(verify|verif|confirm|test|check|try)\w*\b.*\b(isolat\w*|de-?energi\w*|zero energy|does not (move|start|run)|start button|no voltage)\b'
+  - id: remove_locks
+    name: Remove locks and tags only when it is safe
+    patterns:
+      - '\bremov\w*\b.*\b(locks?|tags?|padlocks?)\b'

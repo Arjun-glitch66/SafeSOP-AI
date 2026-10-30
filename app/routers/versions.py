@@ -9,12 +9,12 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from app import config
 from app.auth import require_role
-from app.pagination import page_params, paginate
-from app.limits import check_generate_allowed
-from app.schemas import FINDING_VERDICTS
 from app.db import connect_db, now
-from app.services.evaluation import load_version_source, run_and_save_evaluation
+from app.limits import check_generate_allowed
+from app.pagination import page_params, paginate
+from app.schemas import FINDING_VERDICTS
 from app.services import jobs
+from app.services.evaluation import load_version_source, run_and_save_evaluation
 from app.services.generation import prepare_generation
 from app.services.pdf import render_draft_pdf
 from src.safety_evaluator import extract_draft_section, extract_warnings, text_lines
@@ -86,7 +86,7 @@ def evaluate_version(version_id: str):
     row, original_text = load_version_source(version_id)
     structured = json.loads(row["structured_json"]) if row["structured_json"] else None
     return run_and_save_evaluation(version_id, original_text, row["content"], row["description"] or "", structured,
-                                   row["target_page"])
+                                   row["target_page"], row["document_type"])
 
 
 @router.get("/api/versions/{version_id}/diff")

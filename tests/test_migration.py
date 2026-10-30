@@ -85,7 +85,9 @@ def test_legacy_upgrade_and_a_fresh_alembic_database_have_the_same_schema(temp_d
     api.init_db()
     assert schema(api.DB_PATH) == upgraded
     columns, indexes, triggers, version = upgraded
-    assert version == "0003_relative_paths" and "ix_versions_document_id" in indexes
+    from alembic.script import ScriptDirectory
+    head = ScriptDirectory.from_config(api.migration_config()).get_current_head()
+    assert version == head and "ix_versions_document_id" in indexes
     assert triggers == ["audit_events_no_delete", "audit_events_no_update"]
 
 
