@@ -19,3 +19,18 @@ Items the coding agent stopped on because they need a product, licence, cost or 
      would be deleted too.
   2. Move them into `legacy/` (this edits legacy/, which the rules forbid without your OK).
   3. Keep them as they are.
+
+## Phase 1
+
+- **1.4 EXP-003: collect 30-50 public SOPs and run two-person labelling.** The code is ready
+  (`evaluation/run_generation_experiment.py --sop-dir`, `evaluation/agreement.py`); the procedure
+  is in `docs/BENCHMARK.md`. Needs you to:
+  1. Collect the SOPs and check each one's licence. Decide whether the PDFs may be committed to
+     the repo or must stay outside it (only `manifest.csv` committed).
+  2. Write the change requests before seeing any draft.
+  3. Approve the Gemini cost: manifest rows x models x repeats calls (about 80 for 40 requests,
+     2 models, 1 repeat).
+  4. Find two annotators who label independently (roughly 10 hours each for 80 drafts).
+- **1.4 Second model from another provider?** `--models` compares Gemini models only; there is no
+  provider interface yet. A non-Gemini generator needs a paid API key and an adapter in
+  `src/sop_generator.py`. Decide whether EXP-003 needs one.

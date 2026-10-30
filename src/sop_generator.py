@@ -125,8 +125,10 @@ def generate_sop(
     target_page=None,
     target_section=None,
     feedback=None,
+    model=None,
 ):
-    """Generate an SOP revision draft using the Gemini API."""
+    """Generate an SOP revision draft using the Gemini API.
+    `model` overrides GEMINI_MODEL (used by the benchmark to compare models)."""
 
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
@@ -134,7 +136,7 @@ def generate_sop(
             "GEMINI_API_KEY is not configured. Add it to the project's .env file."
         )
 
-    model = os.getenv("GEMINI_MODEL")
+    model = model or os.getenv("GEMINI_MODEL")
     if not model:
         raise RuntimeError(
             "GEMINI_MODEL is not configured. Add a model ID available to your API key "

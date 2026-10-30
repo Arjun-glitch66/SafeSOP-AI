@@ -171,6 +171,10 @@ The automated evaluator's agreement with these labels is the real-world measure 
 
 Rows where the two annotators disagree are excluded until they are resolved by discussion.
 
+### 6.1 Draft-item annotation (EXP-003 on)
+
+The source-item format above cannot record content the model *added*. From EXP-003, annotators label **each draft step and warning** as `supported`, `unsupported` (new content not backed by the source or the change request) or `contradicting` (goes against the source), and map it to the source item(s) it comes from (`W1`, `S4`, …; empty for a new item). Source items that no draft item maps to are the human-found omissions. The evaluator's labels are kept in a separate file so annotators work blind. `evaluation/agreement.py` reports κ on the label, agreement on the mapping, per-label precision and recall, dangerous misses, hallucinated items and omission recall. Full procedure: `docs/BENCHMARK.md`.
+
 ## 7. Limitations (known, measured in EXP-001)
 
 1. **Lexical, not semantic.** v1.2 catches opposite words, quantifier and actor changes only for the words in its lists (§2.5, §2.6), and contradictions only when the draft step reuses the warning's verb and object words. Other meaning changes (for example "slowly" → "quickly", "any" → "most", or "raise the forks to inspect the chains" against "do not inspect the forklift with the forks raised") are not detected. The optional advisory semantic checker (`src/semantic_checker.py`, off by default) is the planned way to reach these. Correct paraphrases can be flagged as altered (`HARD-PARAPHRASE`, still a false alarm in v1.1, but one that errs on the safe side).

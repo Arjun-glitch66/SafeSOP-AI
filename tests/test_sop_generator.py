@@ -70,3 +70,11 @@ def test_missing_key_raises_clear_error(monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY")
     with pytest.raises(RuntimeError, match="GEMINI_API_KEY is not configured"):
         sop_generator.generate_sop("source", "change")
+
+
+def test_model_argument_overrides_env():
+    FakeClient.response = fake_response(parsed=sop_generator.SopDraft(
+        draft="1. Isolate power.", change_summary="none", preserved_safety_requirements="all",
+        unresolved_questions="none", source_limitations="none"))
+    result = sop_generator.generate_sop("source", "change", model="other-model")
+    assert result["model"] == FakeClient.last_call["model"] == "other-model"
