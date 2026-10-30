@@ -33,7 +33,7 @@ export default function Documents({ app }) {
         <div className="upload-icon"><CloudUpload size={32} /></div>
         <h3>{uploading ? "Uploading PDF..." : file ? "Source PDF saved" : "Drop your SOP here"}</h3>
         <p>{file ? file.name : backendOnline ? "Drag and drop a PDF, or click to browse your files." : "Waiting for the Python backend to connect..."}</p>
-        <span className="upload-hint">PDF with selectable text · up to 20 MB{backendOnline ? "" : " · start the backend at http://127.0.0.1:8000"}</span>
+        <span className="upload-hint">PDF with selectable text · up to 20 MB{backendOnline ? "" : " · start the backend server"}</span>
         {file && <Badge tone="green"><Check size={13} /> Saved to backend</Badge>}
       </div>
 

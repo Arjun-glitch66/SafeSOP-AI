@@ -298,3 +298,15 @@ def test_direct_generation_records_target_page_on_its_request(client):
     generate(client, doc_id, description="add gloves", scope="page", target_page=2)
     request = client.get(f"/api/documents/{doc_id}/requests").json()["requests"][0]
     assert (request["scope"], request["target_page"]) == ("page", 2)
+
+
+def test_allowed_origins_come_from_env(client, monkeypatch):
+    monkeypatch.delenv("ALLOWED_ORIGINS", raising=False)
+    assert api.allowed_origins() == ["http://localhost:5173", "http://127.0.0.1:5173"]
+    monkeypatch.setenv("ALLOWED_ORIGINS", " https://sop.example.com , ,http://localhost:3000")
+    assert api.allowed_origins() == ["https://sop.example.com", "http://localhost:3000"]
+
+    response = client.get("/api/health", headers={"Origin": "http://localhost:5173"})
+    assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
+    assert "access-control-allow-origin" not in client.get(
+        "/api/health", headers={"Origin": "https://evil.example"}).headers
