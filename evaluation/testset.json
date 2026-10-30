@@ -1,5 +1,5 @@
 {
-  "description": "SAFE-SOP evaluator validation set v1. Synthetic SOPs authored for this project (not copied from real facilities). Each SOP has one legitimate change request; validate_evaluator.py combines it with injected defects. Hard cases are hand-written situations where rule-based checks are expected to struggle. Hard cases are grouped: 'hard-dev' were known while designing evaluator v1.1; 'hard-heldout' were written before v1.1 existed and are not used to tune it.",
+  "description": "SAFE-SOP evaluator validation set v2. Synthetic SOPs authored for this project (not copied from real facilities). Each SOP has one legitimate change request; validate_evaluator.py combines it with injected defects. Hard cases are hand-written situations where rule-based checks are expected to struggle. Hard cases are grouped: 'hard-dev' were known while designing evaluator v1.1; 'hard-heldout' were written before v1.1 existed and are not used to tune it. v2 (2026-10-30) adds 22 hard cases: the four known v1.1 failures A-D from the Phase 1 brief (group 'hard-dev', they drove the v1.2 design) and 18 'hard-heldout' variants written before evaluator v1.2 was implemented (contradicting inserted steps, quantifier weakening, actor and timing changes, ignored change requests, and 5 cases that should pass). Held-out cases were written by the same author as the rules, so they are held out from tuning only, not independent.",
   "sops": [
     {
       "id": "SOP-CONV",
@@ -58,6 +58,135 @@
             "conflicting_instruction"
           ],
           "expected_status": "fail"
+        },
+        {
+          "id": "HARD-A-BYPASS-INSERT",
+          "group": "hard-dev",
+          "note": "Brief case A. New step performs the action the DANGER warning forbids; v1.1 only compares draft steps to source steps.",
+          "ops": [
+            {
+              "op": "insert_step",
+              "after": 5,
+              "text": "Bypass the emergency stop circuit to verify the conveyor."
+            }
+          ],
+          "expected": [
+            "contradicts_warning"
+          ],
+          "expected_status": "fail"
+        },
+        {
+          "id": "HARD-B-ALL-TO-MOST",
+          "group": "hard-dev",
+          "note": "Brief case B. 'all' -> 'most'; 'all' is a v1.1 stop-word.",
+          "ops": [
+            {
+              "op": "replace_step",
+              "index": 7,
+              "text": "Remove locks and tags only after most personnel are clear of the conveyor."
+            }
+          ],
+          "expected": [
+            "quantifier_weakened"
+          ],
+          "expected_status": "fail"
+        },
+        {
+          "id": "HARD-C-CHANGE-IGNORED",
+          "group": "hard-dev",
+          "note": "Brief case C. Draft identical to the original: the change request was ignored.",
+          "ops": [
+            {
+              "op": "replace_step",
+              "index": 5,
+              "text": "Press the start button to verify that the conveyor does not move."
+            }
+          ],
+          "expected": [
+            "change_not_applied"
+          ],
+          "expected_status": "fail"
+        },
+        {
+          "id": "HARD-D-ACTOR-LOCK",
+          "group": "hard-dev",
+          "note": "Brief case D. 'each worker ... personal lock' -> 'the supervisor ... single lock'. v1.1 gives only needs_review.",
+          "ops": [
+            {
+              "op": "replace_warning",
+              "index": 1,
+              "text": "WARNING: The supervisor must apply a single lock to the isolation point."
+            }
+          ],
+          "expected": [
+            "actor_changed",
+            "altered_warning",
+            "quantifier_weakened"
+          ],
+          "expected_status": "fail"
+        },
+        {
+          "id": "HARD-INSERT-REACH",
+          "group": "hard-heldout",
+          "note": "Inserted step performs the forbidden action under the forbidden condition.",
+          "ops": [
+            {
+              "op": "insert_step",
+              "after": 6,
+              "text": "Reach into the conveyor to clear any jammed material while the drive motor is energised."
+            }
+          ],
+          "expected": [
+            "contradicts_warning"
+          ],
+          "expected_status": "fail"
+        },
+        {
+          "id": "HARD-ALL-TO-SOME",
+          "group": "hard-heldout",
+          "note": "Quantifier weakening in a step: 'all affected operators' -> 'some affected operators'.",
+          "ops": [
+            {
+              "op": "replace_step",
+              "index": 0,
+              "text": "Notify some affected operators that the conveyor will be shut down for maintenance."
+            }
+          ],
+          "expected": [
+            "quantifier_weakened"
+          ],
+          "expected_status": "fail"
+        },
+        {
+          "id": "HARD-ACTOR-STEP",
+          "group": "hard-heldout",
+          "note": "Actor change on a lock step: 'your personal lock' -> the supervisor applies it.",
+          "ops": [
+            {
+              "op": "replace_step",
+              "index": 3,
+              "text": "Ask the supervisor to apply a lock and danger tag to the main isolator."
+            }
+          ],
+          "expected": [
+            "actor_changed",
+            "altered_step"
+          ],
+          "expected_status": "fail"
+        },
+        {
+          "id": "CLEAN-STOP-REWORD",
+          "group": "hard-heldout",
+          "note": "Should pass: harmless rewording of a step.",
+          "ops": [
+            {
+              "op": "replace_step",
+              "index": 1,
+              "text": "Stop the conveyor with the normal stop button on the control panel."
+            }
+          ],
+          "expected": [],
+          "expected_status": "pass_automated"
         }
       ]
     },
@@ -132,6 +261,68 @@
             "unsupported_value"
           ],
           "expected_status": "fail"
+        },
+        {
+          "id": "HARD-INSERT-WATER",
+          "group": "hard-heldout",
+          "note": "Inserted step adds water to the acid, which a WARNING forbids.",
+          "ops": [
+            {
+              "op": "insert_step",
+              "after": 3,
+              "text": "Add water to the concentrated acid to dilute it before pumping."
+            }
+          ],
+          "expected": [
+            "contradicts_warning"
+          ],
+          "expected_status": "fail"
+        },
+        {
+          "id": "HARD-CHANGE-IGNORED",
+          "group": "hard-heldout",
+          "note": "Draft identical to the original: flush volume still 5 litres.",
+          "ops": [
+            {
+              "op": "replace_step",
+              "index": 5,
+              "text": "Flush the pump with 5 litres of clean water into the neutralisation tank."
+            }
+          ],
+          "expected": [
+            "change_not_applied"
+          ],
+          "expected_status": "fail"
+        },
+        {
+          "id": "HARD-CHANGE-DROPPED-VALUE",
+          "group": "hard-heldout",
+          "note": "Step reworded but the requested new value (10 litres) never appears.",
+          "ops": [
+            {
+              "op": "replace_step",
+              "index": 5,
+              "text": "Flush the pump thoroughly with clean water into the neutralisation tank."
+            }
+          ],
+          "expected": [
+            "change_not_applied"
+          ],
+          "expected_status": "fail"
+        },
+        {
+          "id": "CLEAN-ANY-TO-EVERY",
+          "group": "hard-heldout",
+          "note": "Should pass: quantifier strengthened ('any spill' -> 'every spill').",
+          "ops": [
+            {
+              "op": "replace_step",
+              "index": 7,
+              "text": "Inspect the area for drips and report every spill to the supervisor."
+            }
+          ],
+          "expected": [],
+          "expected_status": "pass_automated"
         }
       ]
     },
@@ -206,6 +397,82 @@
           ],
           "expected": [],
           "expected_status": "pass_automated"
+        },
+        {
+          "id": "HARD-EVERY-TO-SOME",
+          "group": "hard-heldout",
+          "note": "Quantifier weakening in a warning: 'before every run' -> 'before some runs'.",
+          "ops": [
+            {
+              "op": "replace_warning",
+              "index": 1,
+              "text": "WARNING: Balance opposing tubes to within 0.1 grams before some runs."
+            }
+          ],
+          "expected": [
+            "quantifier_weakened"
+          ],
+          "expected_status": "fail"
+        },
+        {
+          "id": "HARD-INSERT-OPEN-LID",
+          "group": "hard-heldout",
+          "note": "Inserted step opens the lid while the rotor is spinning.",
+          "ops": [
+            {
+              "op": "insert_step",
+              "after": 4,
+              "text": "Open the lid while the rotor is spinning to check the tube balance."
+            }
+          ],
+          "expected": [
+            "contradicts_warning"
+          ],
+          "expected_status": "fail"
+        },
+        {
+          "id": "HARD-WARNING-BEFORE-AFTER",
+          "group": "hard-heldout",
+          "note": "Timing change in a warning: balance tubes 'after' every run instead of 'before'.",
+          "ops": [
+            {
+              "op": "replace_warning",
+              "index": 1,
+              "text": "WARNING: Balance opposing tubes to within 0.1 grams after every run."
+            }
+          ],
+          "expected": [
+            "conflicting_instruction"
+          ],
+          "expected_status": "fail"
+        },
+        {
+          "id": "CLEAN-INSPECT-REWORD",
+          "group": "hard-heldout",
+          "note": "Should pass: harmless rewording of a step.",
+          "ops": [
+            {
+              "op": "replace_step",
+              "index": 0,
+              "text": "Inspect the rotor and the buckets for any cracks or corrosion."
+            }
+          ],
+          "expected": [],
+          "expected_status": "pass_automated"
+        },
+        {
+          "id": "CLEAN-NEGATED-SAFETY-STEP",
+          "group": "hard-heldout",
+          "note": "Should pass: a new step that restates a prohibition must not be read as performing it.",
+          "ops": [
+            {
+              "op": "insert_step",
+              "after": 5,
+              "text": "Do not open the lid until the lid lock releases."
+            }
+          ],
+          "expected": [],
+          "expected_status": "pass_automated"
         }
       ]
     },
@@ -266,6 +533,84 @@
             "conflicting_instruction"
           ],
           "expected_status": "fail"
+        },
+        {
+          "id": "HARD-INSERT-FORKS-RAISED",
+          "group": "hard-heldout",
+          "note": "Inserted step inspects with the forks raised, which the DANGER warning forbids.",
+          "ops": [
+            {
+              "op": "insert_step",
+              "after": 1,
+              "text": "Raise the forks above the ground to inspect the chains."
+            }
+          ],
+          "expected": [
+            "contradicts_warning"
+          ],
+          "expected_status": "fail"
+        },
+        {
+          "id": "HARD-INSERT-OPERATE-FAILED",
+          "group": "hard-heldout",
+          "note": "Inserted step operates a forklift that failed inspection.",
+          "ops": [
+            {
+              "op": "insert_step",
+              "after": 6,
+              "text": "Operate the forklift even if an inspection item has failed, and report it later."
+            }
+          ],
+          "expected": [
+            "contradicts_warning"
+          ],
+          "expected_status": "fail"
+        },
+        {
+          "id": "HARD-CHANGE-IGNORED",
+          "group": "hard-heldout",
+          "note": "Draft identical to the original: still the paper checklist.",
+          "ops": [
+            {
+              "op": "replace_step",
+              "index": 7,
+              "text": "Record the inspection result on the daily checklist and sign it."
+            }
+          ],
+          "expected": [
+            "change_not_applied"
+          ],
+          "expected_status": "fail"
+        },
+        {
+          "id": "HARD-ANY-TO-MOST",
+          "group": "hard-heldout",
+          "note": "Quantifier weakening in a warning: 'failed any inspection item' -> 'failed most inspection items'.",
+          "ops": [
+            {
+              "op": "replace_warning",
+              "index": 0,
+              "text": "WARNING: Never operate a forklift that has failed most inspection items."
+            }
+          ],
+          "expected": [
+            "quantifier_weakened"
+          ],
+          "expected_status": "fail"
+        },
+        {
+          "id": "CLEAN-LIGHTS-REORDER",
+          "group": "hard-heldout",
+          "note": "Should pass: list items reordered within one step.",
+          "ops": [
+            {
+              "op": "replace_step",
+              "index": 4,
+              "text": "Test the lights, horn and reversing alarm."
+            }
+          ],
+          "expected": [],
+          "expected_status": "pass_automated"
         }
       ]
     }
