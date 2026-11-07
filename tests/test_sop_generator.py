@@ -26,9 +26,9 @@ def fake_response(parsed=None, text=""):
 
 
 def v3_draft(*step_texts, steps=None, warnings=(), removed_warning_ids=(), preamble=""):
-    """A prompt-v3 structured draft: plain step texts become unchanged steps citing S1, S2, ..."""
+    """A structured draft (prompt v3+; v5 adds reasons): plain step texts become unchanged steps citing S1, S2, ..."""
     steps = steps if steps is not None else [
-        sop_generator.DraftStep(id=f"R{n}", text=text, source_step_ids=[f"S{n}"], change_type="unchanged")
+        sop_generator.DraftStep(id=f"R{n}", text=text, source_step_ids=[f"S{n}"], change_type="unchanged", reason="")
         for n, text in enumerate(step_texts, start=1)]
     return sop_generator.SopDraft(
         preamble=preamble, steps=steps, warnings=list(warnings), removed_warning_ids=list(removed_warning_ids),
@@ -49,7 +49,7 @@ def test_structured_output_is_rendered_as_sections():
     result = sop_generator.generate_sop("source", "change")
 
     assert result["structured_output"] is True
-    assert result["prompt_version"] == "v4" and result["temperature"] == 0.2
+    assert result["prompt_version"] == "v5" and result["temperature"] == 0.2
     assert extract_draft_section(result["text"]) == ("1. Isolate power.", True)
     config = FakeClient.last_call["config"]
     assert config.response_mime_type == "application/json" and config.response_schema is sop_generator.SopDraft
@@ -102,16 +102,45 @@ def test_prompt_numbers_source_steps_and_warnings():
 def test_structured_draft_is_returned_and_rendered_without_removed_steps():
     Step = sop_generator.DraftStep
     draft = v3_draft(preamble="Pump Maintenance", steps=[
-        Step(id="R1", text="Switch off the pump motor.", source_step_ids=["S1"], change_type="modified"),
-        Step(id="R2", text="Drain the casing.", source_step_ids=["S2"], change_type="removed"),
-        Step(id="R3", text="Flush the casing.", source_step_ids=[], change_type="added"),
-    ], warnings=[sop_generator.DraftWarning(id="RW1", text="WARNING: Never open the casing.", source_warning_id="W1")])
+        Step(id="R1", text="Switch off the pump motor.", source_step_ids=["S1"], change_type="modified",
+             reason="The request shortens the step."),
+        Step(id="R2", text="Drain the casing.", source_step_ids=["S2"], change_type="removed",
+             reason="The request replaces draining with flushing."),
+        Step(id="R3", text="Flush the casing.", source_step_ids=[], change_type="added", reason=""),
+    ], warnings=[sop_generator.DraftWarning(id="RW1", text="WARNING: Never open the casing.", source_warning_id="W1",
+                                            reason="")])
     FakeClient.response = fake_response(parsed=draft)
     result = sop_generator.generate_sop(SOURCE, "change")
     assert result["structured"]["steps"][1]["change_type"] == "removed"
     assert extract_draft_section(result["text"])[0] == (
         "Pump Maintenance\nWARNING: Never open the casing.\n1. Switch off the pump motor.\n2. Flush the casing.")
     assert "CHANGE SUMMARY:\nnone" in result["text"]
+    # v5: a change log after the summary (outside DRAFT, so it is never checked as procedure text).
+    assert ("CHANGE LOG:\n- R1 modified from S1: The request shortens the step.\n"
+            "- R2 removed from S2: The request replaces draining with flushing.\n"
+            "- R3 added: NO REASON GIVEN") in result["text"]
+    assert result["text"].index("CHANGE SUMMARY:") < result["text"].index("CHANGE LOG:")
+    assert result["prompt_version"] == "v5"
+
+
+def test_a_truncated_answer_is_asked_for_once_more_before_failing(monkeypatch):
+    answers = [fake_response(parsed=None), fake_response(parsed=v3_draft("Switch off the pump motor."))]
+    calls = []
+
+    def generate_content(**kwargs):
+        calls.append(kwargs)
+        return answers[len(calls) - 1]
+
+    client = SimpleNamespace(models=SimpleNamespace(generate_content=generate_content))
+    monkeypatch.setattr(sop_generator.genai, "Client", lambda **kwargs: client)
+    result = sop_generator.generate_sop(SOURCE, "change")
+    assert len(calls) == 2 and "1. Switch off the pump motor." in result["text"]
+
+    calls.clear()
+    answers[1] = fake_response(parsed=None)
+    with pytest.raises(RuntimeError, match="did not return a complete structured draft"):
+        sop_generator.generate_sop(SOURCE, "change")
+    assert len(calls) == 2  # one retry (LLM_OUTPUT_RETRIES default 1), then give up: no fallback configured
 
 
 # --- 3.3 prompt-injection hardening ---

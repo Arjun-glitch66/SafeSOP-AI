@@ -1,5 +1,5 @@
 {
-  "description": "SAFE-SOP evaluator validation set v2. Synthetic SOPs authored for this project (not copied from real facilities). Each SOP has one legitimate change request; validate_evaluator.py combines it with injected defects. Hard cases are hand-written situations where rule-based checks are expected to struggle. Hard cases are grouped: 'hard-dev' were known while designing evaluator v1.1; 'hard-heldout' were written before v1.1 existed and are not used to tune it. v2 (2026-10-30) adds 22 hard cases: the four known v1.1 failures A-D from the Phase 1 brief (group 'hard-dev', they drove the v1.2 design) and 18 'hard-heldout' variants written before evaluator v1.2 was implemented (contradicting inserted steps, quantifier weakening, actor and timing changes, ignored change requests, and 5 cases that should pass). Held-out cases were written by the same author as the rules, so they are held out from tuning only, not independent.",
+  "description": "SAFE-SOP evaluator validation set v2. Synthetic SOPs authored for this project (not copied from real facilities). Each SOP has one legitimate change request; validate_evaluator.py combines it with injected defects. Hard cases are hand-written situations where rule-based checks are expected to struggle. Hard cases are grouped: 'hard-dev' were known while designing evaluator v1.1; 'hard-heldout' were written before v1.1 existed and are not used to tune it. v2 (2026-10-30) adds 22 hard cases: the four known v1.1 failures A-D from the Phase 1 brief (group 'hard-dev', they drove the v1.2 design) and 18 'hard-heldout' variants written before evaluator v1.2 was implemented (contradicting inserted steps, quantifier weakening, actor and timing changes, ignored change requests, and 5 cases that should pass). Held-out cases were written by the same author as the rules, so they are held out from tuning only, not independent. v3 (2026-11-06) adds 6 cases in group 'hard-dev-v1.4' (signal-word downgrades and 2 clean controls). Two value-change cases were drafted and dropped: evaluator v1.1's unit check already caught them, because in these SOPs every reused number carries a different unit; the value_changed rule is covered by unit tests instead. They were written by the same author immediately before evaluator v1.4 and drove its design, so they are development cases, not held-out evidence.",
   "sops": [
     {
       "id": "SOP-CONV",
@@ -187,6 +187,55 @@
           ],
           "expected": [],
           "expected_status": "pass_automated"
+        },
+        {
+          "id": "HARD-V14-DANGER-TO-CAUTION",
+          "note": "Signal word lowered (DANGER -> CAUTION). Label words are stop-words, so token overlap stays 1.0.",
+          "ops": [
+            {
+              "op": "replace_warning",
+              "index": 3,
+              "text": "CAUTION: Do not bypass the emergency stop circuit for any reason."
+            }
+          ],
+          "expected": [
+            "warning_downgraded"
+          ],
+          "expected_status": "fail",
+          "group": "hard-dev-v1.4"
+        },
+        {
+          "id": "HARD-V14-REQUESTED-DOWNGRADE",
+          "note": "Same downgrade, but the change request asks for it: flag for review, do not fail.",
+          "ops": [
+            {
+              "op": "replace_warning",
+              "index": 3,
+              "text": "CAUTION: Do not bypass the emergency stop circuit for any reason."
+            }
+          ],
+          "request_append": " Relabel the emergency stop bypass statement as a caution.",
+          "expected": [
+            "warning_downgraded"
+          ],
+          "expected_status": "needs_review",
+          "group": "hard-dev-v1.4"
+        },
+        {
+          "id": "HARD-V14-LABEL-DROPPED",
+          "note": "The WARNING label is removed; the prohibition text is unchanged. Review, not fail.",
+          "ops": [
+            {
+              "op": "replace_warning",
+              "index": 0,
+              "text": "Never reach into the conveyor while the drive motor is energised."
+            }
+          ],
+          "expected": [
+            "warning_downgraded"
+          ],
+          "expected_status": "needs_review",
+          "group": "hard-dev-v1.4"
         }
       ]
     },
@@ -473,6 +522,20 @@
           ],
           "expected": [],
           "expected_status": "pass_automated"
+        },
+        {
+          "id": "CLEAN-V14-DANGER-REWORD",
+          "note": "Same signal word, 'Do not' -> 'Never': no finding expected.",
+          "ops": [
+            {
+              "op": "replace_warning",
+              "index": 3,
+              "text": "DANGER: Never exceed the maximum rotor speed printed on the rotor label."
+            }
+          ],
+          "expected": [],
+          "expected_status": "pass_automated",
+          "group": "hard-dev-v1.4"
         }
       ]
     },
@@ -611,6 +674,36 @@
           ],
           "expected": [],
           "expected_status": "pass_automated"
+        },
+        {
+          "id": "HARD-V14-WARNING-TO-NOTE",
+          "note": "WARNING -> NOTE on a pinch-point hazard.",
+          "ops": [
+            {
+              "op": "replace_warning",
+              "index": 1,
+              "text": "NOTE: Keep hands clear of the mast and chains while testing the lift."
+            }
+          ],
+          "expected": [
+            "warning_downgraded"
+          ],
+          "expected_status": "fail",
+          "group": "hard-dev-v1.4"
+        },
+        {
+          "id": "CLEAN-V14-CAUTION-TO-WARNING",
+          "note": "Signal word raised (CAUTION -> WARNING): stricter, not a finding.",
+          "ops": [
+            {
+              "op": "replace_warning",
+              "index": 2,
+              "text": "WARNING: Battery electrolyte is corrosive; wear gloves when checking the battery."
+            }
+          ],
+          "expected": [],
+          "expected_status": "pass_automated",
+          "group": "hard-dev-v1.4"
         }
       ]
     }

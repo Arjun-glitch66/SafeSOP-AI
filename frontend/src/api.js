@@ -72,6 +72,27 @@ export async function login(username, password) {
   return result.user;
 }
 export const getMe = () => request("/api/auth/me");
+// Changing the password ends every other session; the reply carries a fresh token for this one.
+export async function changePassword(currentPassword, newPassword) {
+  const result = await request("/api/auth/password", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  });
+  setToken(result.access_token);
+  return result.user;
+}
+
+// ---- users and audit log (admin) ----
+const json = (method, body) => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+export const getUsers = async () => (await request("/api/users?limit=500")).users;
+export const createUser = (username, password, role) => request("/api/users", json("POST", { username, password, role }));
+// changes: { role } and/or { password } (an admin reset; it ends that user's sessions).
+export const updateUser = (userId, changes) => request(`/api/users/${encodeURIComponent(userId)}`, json("PATCH", changes));
+export const getAuditEvents = (limit = 50, offset = 0) => request(`/api/audit?limit=${limit}&offset=${offset}`);
+export const verifyAuditChain = () => request("/api/audit/verify");
+
+// ---- dashboard ----
+export const getOverview = () => request("/api/overview");
 
 // ---- backend status ----
 export const checkBackend = () => request("/api/health", { auth: false });

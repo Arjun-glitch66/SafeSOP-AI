@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { CheckCircle2, FileText, Lock, RefreshCw, X } from "lucide-react";
 import { createReview, getReviews, getVersion } from "../api.js";
+import ChangeLog from "../components/ChangeLog.jsx";
 import ReviewTimeline from "../components/ReviewTimeline.jsx";
 import SignOffDialog from "../components/SignOffDialog.jsx";
 import VersionEvidence from "../components/VersionEvidence.jsx";
@@ -58,6 +59,7 @@ export default function ReviewPage() {
         </div>
       </div>
 
+      <ChangeLog structuredJson={v.structured_json} />
       <VersionEvidence versionId={v.id} documentId={v.document_id} onEvaluated={version.reload} />
       <ReviewTimeline reviews={reviews} status={v.status} />
 

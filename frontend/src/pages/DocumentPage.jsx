@@ -191,6 +191,13 @@ function RequestForm({ doc, onGenerated }) {
   );
 }
 
+export function scopeLabel(version) {
+  if (version.scope === "page") return `Page ${version.target_page ?? "?"}`;
+  if (version.scope === "section") return `Section ${version.target_section ?? "?"}`;
+  if (version.scope === "step") return `Step ${version.target_section ?? "?"}`;
+  return "Full document";
+}
+
 function VersionRegister({ versions }) {
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
@@ -206,7 +213,7 @@ function VersionRegister({ versions }) {
           <thead><tr><th>Version</th><th>Change request</th><th>Created</th><th>Automated check</th><th>Review status</th></tr></thead>
           <tbody>{rows.map((version) => (
             <tr key={version.id} onClick={() => navigate(`/versions/${version.id}`)}>
-              <td><Link to={`/versions/${version.id}`} className="table-doc" onClick={(event) => event.stopPropagation()}><span className="file-icon"><FileText size={18} /></span><span><strong>Version {version.version_number}</strong><small>{version.scope === "page" ? `Page ${version.target_page ?? "?"}` : "Full document"} · {version.characters} chars</small></span></Link></td>
+              <td><Link to={`/versions/${version.id}`} className="table-doc" onClick={(event) => event.stopPropagation()}><span className="file-icon"><FileText size={18} /></span><span><strong>Version {version.version_number}</strong><small>{scopeLabel(version)} · {version.characters} chars</small></span></Link></td>
               <td>{(version.change_request || "—").slice(0, 80)}{(version.change_request || "").length > 80 ? "…" : ""}</td>
               <td>{new Date(version.created_at).toLocaleString()}</td>
               <td><Badge tone={evaluationTone[version.evaluation_status] || "gray"}>{evaluationLabel[version.evaluation_status] || "Not run"}</Badge></td>

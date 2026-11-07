@@ -1,14 +1,18 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router";
-import { AlertTriangle, CheckCircle2, Files, ListChecks, LogOut, Menu, PanelLeftClose, Shield, ShieldCheck, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Files, KeyRound, LayoutDashboard, ListChecks, LogOut, Menu, PanelLeftClose, ScrollText, Shield, ShieldCheck, Users, X } from "lucide-react";
 import ErrorBoundary from "./ErrorBoundary.jsx";
 import { useAuth, useBackend, useNotice } from "../state.jsx";
 
 const mobileQuery = window.matchMedia("(max-width: 800px)");  // same breakpoint as index.css
 
 const NAVIGATION = [
+  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { to: "/documents", label: "Documents", icon: Files },
   { to: "/checks", label: "Automated checks", icon: ListChecks },
+  { to: "/users", label: "Users", icon: Users, admin: true },
+  { to: "/audit", label: "Audit log", icon: ScrollText, admin: true },
+  { to: "/account", label: "Account", icon: KeyRound },
 ];
 
 export default function Layout() {
@@ -38,7 +42,7 @@ export default function Layout() {
         </div>
         <nav aria-label="Main">
           <div className="nav-group">
-            {NAVIGATION.map((item) => (
+            {NAVIGATION.filter((item) => !item.admin || user?.role === "admin").map((item) => (
               <NavLink key={item.to} to={item.to} onClick={() => setMobileNav(false)} className={({ isActive }) => `nav-item ${isActive ? "nav-active" : ""}`}>
                 <item.icon size={18} /><span>{item.label}</span>
               </NavLink>
@@ -54,7 +58,7 @@ export default function Layout() {
         <header className="topbar">
           <div className="topbar-left"><button className="icon-button mobile-menu" onClick={() => setMobileNav(true)} aria-label="Open navigation" aria-expanded={mobileNav} aria-controls="sidebar"><Menu size={20} /></button></div>
           <div className="topbar-right">
-            {user && <span className="user-chip"><strong>{user.username}</strong> · {user.role}</span>}
+            {user && <NavLink className="user-chip" to="/account" title="Account and password"><strong>{user.username}</strong> · {user.role}</NavLink>}
             <button className="btn btn-secondary" onClick={logout}><LogOut size={15} /> Sign out</button>
           </div>
         </header>

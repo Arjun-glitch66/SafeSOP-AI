@@ -104,6 +104,16 @@ def test_upload_rejects_non_pdf(client):
     assert response.status_code == 400
 
 
+def test_upload_rejects_a_password_protected_pdf_and_keeps_no_file(client):
+    pdf = pymupdf.open()
+    pdf.new_page().insert_text((72, 72), "WARNING: secret procedure")
+    locked = pdf.tobytes(encryption=pymupdf.PDF_ENCRYPT_AES_256, owner_pw="owner-pw", user_pw="user-pw")
+    response = client.post("/api/documents/upload", files={"file": ("locked.pdf", locked, "application/pdf")})
+    assert response.status_code == 400 and "password-protected" in response.json()["detail"]
+    assert list(api.UPLOAD_DIR.iterdir()) == []
+    assert client.get("/api/documents").json()["total"] == 0
+
+
 def test_every_generation_reads_the_original_and_never_changes_it(client):
     doc_id = upload_two_page_pdf(client)
     before = original_hash(doc_id)
@@ -844,6 +854,21 @@ def test_section_scope_sends_only_the_section_and_keeps_everything_else_byte_for
     assert version["target_section"] == "SEC3"
     findings = version["safety_evaluation"]["findings"]
     assert not any(f["severity"] in ("critical", "high") for f in findings), findings  # untouched parts raise nothing
+
+
+def test_rerunning_checks_on_a_section_draft_gives_the_same_result_as_at_generation(client, monkeypatch):
+    # The stored JSON cites ids local to the section (S1 = its first step); the re-run must not
+    # match them against the whole document's S1, S2, ... (that reported steps as omitted).
+    doc_id = upload_sectioned_pdf(client)
+    monkeypatch.setattr(api, "generate_sop", lambda **kwargs: {"text": "unused", "model": "stub-model", "structured": part_draft(
+        ["Wipe the rotor with 70 percent ethanol.", "Close the cover."])})
+    version = generate(client, doc_id, description="Wipe the rotor with 70 percent ethanol.",
+                       scope="section", target_section="SEC3").json()
+    at_generation = version["safety_evaluation"]
+    rerun = client.post(f"/api/versions/{version['version_id']}/evaluate").json()
+    assert rerun["status"] == at_generation["status"]
+    assert [f["type"] for f in rerun["findings"]] == [f["type"] for f in at_generation["findings"]]
+    assert not any(f["type"] == "omitted_step" for f in rerun["findings"]), rerun["findings"]
 
 
 def test_step_scope_keeps_the_step_number(client, monkeypatch):

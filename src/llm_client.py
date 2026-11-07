@@ -7,8 +7,9 @@ Selected by environment variables:
   GEMINI_API_KEY, GEMINI_MODEL           for gemini
   OLLAMA_URL (default http://localhost:11434), OLLAMA_MODEL   for ollama (a local model)
 
-The primary provider retries on its own (the Gemini SDK retries 429/5xx with backoff). If it
-still fails, or returns output that fails `validate`, the fallback runs. A fallback is never
+The primary provider retries on its own (the Gemini SDK retries 429/5xx with backoff). Output
+that fails `validate` with OutputValidationError (cut off, blocked, empty) is asked for again,
+up to LLM_OUTPUT_RETRIES more times (default 1). If the primary still fails, the fallback runs. A fallback is never
 silent: the result says fallback_used=True with the reason, the caller stores both on the
 version, and a warning is logged.
 """
@@ -24,6 +25,17 @@ from google.genai import types
 logger = logging.getLogger("safesop.llm")
 
 RETRY_STATUS_CODES = [429, 500, 502, 503, 504]
+
+
+class OutputValidationError(RuntimeError):
+    """The provider answered, but the output is unusable (truncated, blocked, empty). Worth one more try."""
+
+
+def output_retries():
+    try:
+        return max(0, int(os.getenv("LLM_OUTPUT_RETRIES", "1")))
+    except ValueError:
+        return 1
 
 
 class GeminiProvider:
@@ -122,10 +134,18 @@ def generate(prompt, schema, system_instruction=None, temperature=None, model=No
     fallback = os.getenv("LLM_FALLBACK_PROVIDER", "").strip().lower()
 
     def attempt(provider):
-        result = provider.generate(prompt, schema, system_instruction=system_instruction, temperature=temperature)
-        if validate:
-            validate(result)
-        return result
+        """Call the provider; ask again (a fresh sample) while the output fails validation."""
+        for tries in range(1, output_retries() + 2):
+            result = provider.generate(prompt, schema, system_instruction=system_instruction, temperature=temperature)
+            try:
+                if validate:
+                    validate(result)
+                return {**result, "attempts": tries}
+            except OutputValidationError as exc:
+                if tries > output_retries():
+                    raise
+                logger.warning("%s returned unusable output (%s); asking again.", provider.name, exc)
+        raise AssertionError("unreachable")
 
     try:
         return {**attempt(make_provider(primary, model)), "fallback_used": False, "fallback_reason": None}

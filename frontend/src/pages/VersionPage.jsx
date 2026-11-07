@@ -1,6 +1,7 @@
 import { Link, useNavigate, useParams } from "react-router";
 import { ArrowDownToLine, ClipboardCheck, FileText, RefreshCw } from "lucide-react";
 import { downloadApproved, downloadEvaluationReport, downloadTranslation, downloadVersion, getReviews, getVersion } from "../api.js";
+import ChangeLog from "../components/ChangeLog.jsx";
 import ReviewTimeline from "../components/ReviewTimeline.jsx";
 import VersionEvidence from "../components/VersionEvidence.jsx";
 import { Badge, EmptyState } from "../components/ui.jsx";
@@ -50,6 +51,7 @@ export default function VersionPage() {
         {can("author") && <button className="btn btn-secondary" onClick={() => navigate(`/documents/${v.document_id}`, { state: { parent: v } })}><RefreshCw size={16} /> Regenerate from original</button>}
       </div>
 
+      <ChangeLog structuredJson={v.structured_json} />
       <VersionEvidence versionId={v.id} documentId={v.document_id} onEvaluated={version.reload} />
       {v.translated_content && <section className="panel" aria-labelledby="translation-heading">
         <div className="panel-heading">

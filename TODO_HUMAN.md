@@ -2,6 +2,30 @@
 
 Items the coding agent stopped on because they need a product, licence, cost or labelling decision.
 
+## Completion phase (2026-11-06) — do these first
+
+1. ~~**Run Gemini once with your local key.**~~ **Done 2026-11-06 (EXP-005):** `check_gemini.py` succeeded and
+   one prompt-v5 draft was generated through the running API with `gemini-3.5-flash-lite`; the model filled the
+   `reason` field for its one change. One run on an easy synthetic case, not an accuracy result
+   (`results/EXP-005_live_generation.md`). Still to do yourself: a harder
+   live test (longer SOP, several changes) if you approve the extra calls.
+   **Browser run done 2026-11-07** (logbook entry 14): a headless-Chrome run at desktop width through all 15
+   workflows passed 125/125 checks with three live drafts (every change had a reason; no warning or critical
+   findings; three easy synthetic cases, not an accuracy result). One display bug was fixed: long reasons were
+   cut off. Still untested, so please check by hand or decide they are out of scope: a phone-width layout, Firefox
+   and Safari, a screen reader, whether the PDF preview actually shows the PDF, and the Docker/nginx build (check
+   that the CSP and other security headers arrive and the app still works under them).
+   **Before anyone else uses the app:** `JWT_SECRET` must be a long random string (32+ characters,
+   e.g. `python -c "import secrets; print(secrets.token_urlsafe(48))"`) and `ADMIN_PASSWORD` must have at least
+   10 characters, or the first start on a new database fails when it creates the admin.
+2. **Label EXP-002** with a second annotator (`results/EXP-002_annotation.csv`, then `evaluation/agreement.py`).
+   This is the only route to a human-validated result on real model output for the capstone. Optionally
+   re-run EXP-002 with prompt v5 / evaluator v1.4 first (12 billed calls).
+3. **Decide 0.4 below** (should `rejected` be final?). Still open.
+4. **Throttling defaults:** 5 failed sign-ins per username per 15 minutes, 20 per client address. Confirm or
+   change (`LOGIN_MAX_FAILURES`, `LOGIN_MAX_FAILURES_PER_CLIENT`, `LOGIN_WINDOW_SECONDS`).
+5. **Review the local changes and decide on commit and push.** Nothing has been committed or pushed.
+
 ## Phase 0
 
 - **0.4 Should "rejected" also be a final, locked state?** Right now only `approved` is locked
@@ -52,6 +76,8 @@ Items the coding agent stopped on because they need a product, licence, cost or 
   login rate limiting (not built; 3.4 only limits `/generate`).
 - **2.2 Run prompt v3 once against the real Gemini API** (a few billed calls) to check that it
   fills `source_step_ids` / `source_warning_id` correctly. All tests use a stub.
+  *Update 2026-11-06:* done for the current prompt (v5, which keeps the v3 id fields): in EXP-005 every
+  step and warning cited the correct S/W id. One run only.
 
 ## Phase 3
 

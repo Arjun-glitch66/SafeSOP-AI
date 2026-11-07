@@ -12,6 +12,10 @@ const FRAMEWORK = [
   ["Change not applied", "The draft equals the original, or none of the change request's new values or terms appear in it.", "Critical"],
   ["Required elements for the SOP type", "With an SOP type chosen at upload (e.g. lockout/tagout), each required element present in the original must still be in the draft.", "Critical"],
   ["Hierarchy-of-controls downgrade", "An engineering or elimination control (guard, interlock, ventilation, isolation) replaced by training, signs or PPE.", "High"],
+  ["Signal-word downgrade (v1.4)", "A matched warning whose label drops (DANGER -> WARNING -> CAUTION -> NOTE). A removed label is flagged for review.", "High"],
+  ["Value changed to another source value (v1.4)", "A matched step or warning now uses a value found elsewhere in the source with the same unit (e.g. 30 -> 10 minutes), which the new-value check cannot see.", "Critical"],
+  ["Unexplained change (v1.4, prompt v5)", "A step marked modified, added or removed, or a new warning, without the model's stated reason.", "Review"],
+  ["Warning precision and wording kept (v1.4 metrics)", "Share of draft warnings supported by a source warning or the change request; mean word overlap of matched steps. Metrics only, not findings.", "Review"],
   ["Structured matching (prompt v3)", "Drafts that cite source ids (S1.., W1..) are matched by id, not by text. A warning declared removed is still critical; a step labelled unchanged is still compared with its source.", "Critical"],
   ["Uncertain cases", "Borderline matches, missing sections or undetectable structure give 'needs review', never a pass.", "Review"],
 ];

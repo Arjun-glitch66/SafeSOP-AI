@@ -7,6 +7,7 @@ few XML files), so no extra dependency is needed.
 import html
 import io
 import json
+import re
 import zipfile
 from xml.sax.saxutils import escape
 
@@ -128,7 +129,9 @@ def build_docx(record):
 def html_pdf(body_html):
     story = pymupdf.Story(html=body_html, user_css=(
         "body { font-family: sans-serif; font-size: 10pt; } h1 { font-size: 15pt; } h2 { font-size: 12pt; margin-top: 10pt; }"
-        "p { margin: 0 0 3pt 0; } td, th { border: 1px solid #999; padding: 2pt 4pt; vertical-align: top; }"))
+        "p { margin: 0 0 3pt 0; } td, th { border: 1px solid #999; padding: 2pt 4pt; vertical-align: top; }"
+        # Proportional fonts get typographic ligatures (ff -> U+FB00), which would corrupt a copied hash.
+        ".mono { font-family: monospace; font-size: 8pt; }"))
     buffer = io.BytesIO()
     writer = pymupdf.DocumentWriter(buffer)
     page, more = pymupdf.paper_rect("a4"), True
@@ -141,9 +144,18 @@ def html_pdf(body_html):
     return buffer.getvalue()
 
 
+HEX_FINGERPRINT = re.compile(r"[0-9a-f]{64}")
+
+
+def _value_html(value):
+    """A table value; SHA-256 fingerprints in monospace so they extract and copy exactly."""
+    text = html.escape(str(value))
+    return f'<span class="mono">{text}</span>' if HEX_FINGERPRINT.fullmatch(str(value)) else text
+
+
 def build_pdf(record):
     e = html.escape
-    rows = "".join(f"<tr><th>{e(label)}</th><td>{e(str(value))}</td></tr>" for label, value in approval_lines(record))
+    rows = "".join(f"<tr><th>{e(label)}</th><td>{_value_html(value)}</td></tr>" for label, value in approval_lines(record))
     log = "".join(f"<tr><td>{e(n)}</td><td>{e(d)}</td><td>{e(a)}</td><td>{e(r)}</td></tr>" for n, d, a, r in change_log(record))
     lines = "".join(f"<p>{e(line) or '&nbsp;'}</p>" for line in record["draft"].splitlines())
     summary = f"<p><b>Changes in this revision:</b> {e(record['summary'])}</p>" if record["summary"] else ""

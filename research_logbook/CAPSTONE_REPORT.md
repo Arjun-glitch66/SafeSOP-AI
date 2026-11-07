@@ -2,13 +2,13 @@
 
 **Tier 4 Capstone · Draft report**
 
-Status: complete except the human-annotation rows of Section 5.3 (EXP-002), which are marked *pending*.
+Status: complete except the human-annotation rows of Section 5.3 (EXP-002), which are marked *pending*. Updated 2026-11-06 for prompt v5, evaluator v1.4, EXP-001d and EXP-004.
 
 ---
 
 ## Abstract
 
-Standard Operating Procedures (SOPs) are updated by hand, so documentation lags behind process changes. SafeSOP AI drafts a revised SOP from an existing PDF and an engineer's change request using Google Gemini, then checks the draft automatically against the unchanged original for safety-critical failures. The checks are lost warnings, invented instructions or values, reordered steps, and omitted, duplicated or contradicted steps. Every draft is stored as a separate version with its lineage, model settings, automated evaluation and human review decision. We define an original rule-based evaluation framework (SAFE-SOP) with explicit metrics, thresholds and uncertainty rules, and validate it on 64 constructed cases. Version 1.2 adds checks for steps that contradict a warning, weakened quantifiers, changed actors and ignored change requests. It handles all 32 standard defects and 21 of 24 held-out hard cases (v1.1: 12 of 24), with one false alarm on the safe side. All cases are synthetic; accuracy on real model errors is not yet measured. The automated checks never approve a draft: approval is a recorded human decision.
+Standard Operating Procedures (SOPs) are updated by hand, so documentation lags behind process changes. SafeSOP AI drafts a revised SOP from an existing PDF and an engineer's change request using Google Gemini, then checks the draft automatically against the unchanged original for safety-critical failures. The checks are lost warnings, invented instructions or values, reordered steps, and omitted, duplicated or contradicted steps. Every draft is stored as a separate version with its lineage, model settings, automated evaluation and human review decision. We define an original rule-based evaluation framework (SAFE-SOP) with explicit metrics, thresholds and uncertainty rules, and validate it on 64 constructed cases. Version 1.2 adds checks for steps that contradict a warning, weakened quantifiers, changed actors and ignored change requests. It handles all 32 standard defects and 21 of 24 held-out hard cases (v1.1: 12 of 24), with one false alarm on the safe side. Version 1.4 adds signal-word downgrades, same-unit value changes and unexplained-change checks without changing any earlier result. On the extended 70-case set, its binary flag accuracy is 0.943, against 0.729 for a text-similarity baseline and 0.329 for exact warning matching (EXP-004). All cases are synthetic; accuracy on real model errors is not yet measured. The automated checks never approve a draft: approval is a recorded human decision.
 
 ## 1. Problem and objectives
 
@@ -25,17 +25,17 @@ Standard Operating Procedures (SOPs) are updated by hand, so documentation lags 
 ```mermaid
 flowchart LR
     UI["React + Vite UI"] -->|REST| API["FastAPI"]
-    API --> GEN["Generator (prompt v2)"] -->|JSON schema| GEM[("Gemini")]
-    API --> EVAL["SAFE-SOP evaluator v1.2"]
-    API --> DB[("SQLite: documents, change_requests,<br/>versions, evaluations, review_history")]
+    API --> GEN["Generator (prompt v5)"] -->|JSON schema| GEM[("Gemini")]
+    API --> EVAL["SAFE-SOP evaluator v1.4"]
+    API --> DB[("SQLite or Postgres: documents, change_requests, versions,<br/>evaluations, review_history, users, audit_events, jobs")]
     API --> FILES[("Immutable original PDFs")]
 ```
 
 - **Immutability.** Uploads are stored as `<uuid>.pdf` with their SHA-256 and are never written to again. An automated test confirms the hash is unchanged after several generations.
 - **Regeneration rule.** Each generation reads the *original* PDF (the full document or one page). Regenerating from version *n* records `parent_version_id = n` for lineage only; version *n*'s text is never used as the source. This prevents errors compounding across revisions.
-- **Generation.** The prompt (v2) treats the source as the authority, forbids invented facts, requires warnings and step order to be preserved, and asks the model to flag uncertainty. Output is a JSON object enforced by a response schema. Temperature is 0.2. The client retries rate-limit and server errors. Incomplete output is rejected, and no version is created.
+- **Generation.** The prompt (v5) treats the source as the authority, forbids invented facts, requires warnings and step order to be preserved, and asks the model to flag uncertainty. The rules are in the system instruction; the PDF text and reviewer comments are fenced by random per-request markers and declared to be data (prompt-injection hardening). The source's warnings and steps are numbered (W1…, S1…), and the model returns JSON, enforced by a response schema, in which every draft step and warning cites its source id and states a `reason` for any change; these are rendered as a CHANGE LOG. Temperature is 0.2. The client retries rate-limit and server errors, and asks once more when the output is truncated or empty. If it is still unusable, no version is created.
 - **Traceability.** Every version records its source document, parent, change request, scope or page, model, prompt version, temperature, token counts and time. Evaluations and reviews are append-only tables.
-- **Human review.** A reviewer approves, rejects or requests revision. Approval needs a name, and if the automated checks did not pass, a written justification enforced by the server.
+- **Human review.** Users sign in with roles (author, reviewer, admin). A reviewer approves, rejects or requests revision. Approval is an electronic signature: the reviewer re-enters their password, nobody can approve a draft they generated, a written justification is required when the automated checks did not pass, and an approved version is locked. Uploads, generations, reviews and account changes go to an append-only, hash-chained audit log.
 
 ## 3. SAFE-SOP evaluation framework
 
@@ -52,6 +52,11 @@ The full definitions are in `research_logbook/EVALUATION_FRAMEWORK.md`. In summa
 | Weakened quantifiers (v1.2) | all / every / each / always / before replaced by some / most / a / after … in a matched line | critical |
 | Changed actor (v1.2) | Different performer named on a lock, tag or verification line | high |
 | Change not applied (v1.2) | Draft equals the original, or none of the request's new values or terms appear | critical |
+| Required elements, control downgrade (v1.3) | Checklist element lost for the SOP type; guard/interlock replaced by training or PPE | critical / high |
+| Signal-word downgrade (v1.4) | DANGER → WARNING → CAUTION → NOTE in a matched warning | high (review if requested) |
+| Changed value (v1.4) | A matched line now uses another source value of the same unit, not given by the request | critical |
+| Unexplained change (v1.4) | A changed step or new warning without the model's stated reason | review |
+| Warning precision, lexical consistency (v1.4) | Share of draft warnings supported by the source or the request; mean Dice of matched steps | metrics only |
 | Uncertain cases | Borderline scores or undetectable structure | always `needs_review`, never a pass |
 
 **Decision rule:** any critical or high finding → `fail`; else any review finding → `needs_review`; else `pass_automated` ("no rule fired", **not** approval). The model's own claims about which warnings it preserved are ignored.
@@ -62,7 +67,10 @@ The full definitions are in `research_logbook/EVALUATION_FRAMEWORK.md`. In summa
 |---|---|---|---|
 | EXP-001 / 001b | 4 synthetic SOPs written for this project (conveyor isolation, acid transfer, centrifuge, forklift inspection), each with 4 warnings and 8 steps, plus 1 legitimate change request each | None: drafts built by known edits | Exact (the edits are known) |
 | EXP-001c | The same 4 SOPs; test set v2 adds 22 hard cases | None: drafts built by known edits | Exact |
+| EXP-001d | Test set v3: v2 plus 6 `hard-dev-v1.4` cases (4 signal-word downgrades, 2 clean controls), 70 cases | None | Exact |
 | EXP-002 | The same 4 SOPs and change requests, 3 runs each | Gemini, prompt v2, temperature 0.2 | Two independent human annotators (framework §6) |
+| EXP-004 | The 70 EXP-001d cases | None | Exact; compares SAFE-SOP v1.4 with three simple baselines |
+| EXP-005 | SOP-ACID and its change request, **1 run** | Gemini `gemini-3.5-flash-lite`, prompt v5, temperature 0.2, through the running API | None (functional check; compared with the source by script) |
 
 EXP-001 cases: for each SOP, 1 clean draft and 7 drafts with one injected defect each (missing warning, swapped steps, unsupported step, unsupported value, omitted step, duplicated step, negation flip). On top of these: 4 hard cases known while designing v1.1 (`hard-dev`), and 6 hard cases written before v1.1 existed (`hard-heldout`), including one negative control. 42 cases in total.
 
@@ -107,6 +115,31 @@ The three held-out misses show where the word lists end:
 - "any inspection item" → "most inspection items": `any` is not in the strong-quantifier list.
 - The requested "10 litres" was dropped, but "10" already occurs in the original ("within 10 metres"), so it is not a new value and the check has nothing left to look for.
 
+### 5.1c EXP-001d: evaluator v1.3 vs v1.4 (same 70 cases)
+
+| Group | v1.3 | v1.4 |
+|---|---|---|
+| Standard defects (32) | 32/32 | 32/32 |
+| Hard, dev (8) | 7/8 | 7/8 |
+| Hard, dev v1.4 (6, of which 2 should pass) | 2/6 | 6/6 |
+| Hard, held-out (24) | 21/24 | 21/24 |
+| Status accuracy (all 70) | 0.886 | 0.943 |
+| Defect cases flagged | 0.877 | 0.947 |
+| False alarms on defect-free cases (13) | 0.077 | 0.077 |
+
+Only the four new defect cases changed result; every one of the 64 earlier cases gives the same status and finding types under v1.4 (compared case by case). The 6/6 is expected, not evidence: the new cases were written by the rule author just before the rules and drove their design. Two value-change cases were drafted and then dropped, because v1.1's unit check already caught them (in these SOPs every reused number carries a different unit). The new `value_changed` rule is therefore covered by unit tests only. Files: `results/evaluator_validation_safe-sop-eval-1.3_testset-v3.md`, `..._1.4_testset-v3.md`.
+
+### 5.1d EXP-004: SAFE-SOP against simple baselines (same 70 cases)
+
+| Method | Status accuracy (3-way) | Flag accuracy (binary) | Defects flagged | Clean false alarms |
+|---|---|---|---|---|
+| B0 always pass | 0.186 | 0.186 | 0.000 | 0.000 |
+| B1 exact warning match | 0.300 | 0.329 | 0.228 | 0.231 |
+| B2 text similarity < 0.90 | 0.629 | 0.729 | 0.825 | 0.692 |
+| SAFE-SOP v1.4 | 0.943 | 0.943 | 0.947 | 0.077 |
+
+The B2 threshold was fixed before the first run. Baselines cannot answer "needs review", so the binary flag accuracy is the fair comparison. A generic "the text changed a lot" detector flags most defects, but also 69 % of clean drafts, because a legitimate change already lowers the similarity. Exact matching of warning lines misses everything except deleted or reworded warnings. The same caveats as EXP-001 apply: synthetic cases, written by the rules' author. File: `results/EXP-004_baselines.md`.
+
 ### 5.2 What the misses taught us
 
 v1.0 missed "switch off" → "switch on" and "3000 rpm" → "3000 rcf". Both are dangerous, and both keep almost every word, so overlap-based checks cannot see them. v1.1 adds an explicit opposite-word list and a number-plus-unit comparison. v1.1 in turn passed every case in which a draft step *added* something forbidden (it only compared draft steps with source steps), ignored "all", "each", "before" and "after" as stop-words, and could not tell when the change request had been ignored. v1.2 compares every draft step with every prohibition, keeps those words, and looks for the request's new values and terms in the draft. Each fix is again a word-level rule, with the blind spots listed in §5.1b.
@@ -128,6 +161,20 @@ Model `gemini-3.5-flash-lite`, prompt v2 (JSON schema), temperature 0.2; 4 SOPs 
 
 On these short, well-structured SOPs, Gemini made no errors the framework detects, consistently across runs. This is a ceiling effect: it shows the pipeline works end to end with a real model, but not how well the evaluator catches real errors. The proposed EXP-003 uses harder inputs (longer public SOPs, multi-step or conflicting change requests) to provoke them. At the time of EXP-002 the evaluator did not check whether the requested change was applied, so this was checked by hand. v1.2's `change_not_applied` check now does this automatically, but only by looking for the request's new numbers and terms, and it has not been re-run on the EXP-002 drafts.
 
+### 5.3b EXP-005: one live run of prompt v5 and evaluator v1.4
+
+A single real-model run through the deployed pipeline (upload, background job, Gemini, save, evaluation), on 2026-11-06, with the synthetic SOP-ACID (4 warnings, 8 steps) and the request "Increase the pump flush volume from 5 litres to 10 litres of clean water."
+
+| Measure | Value |
+|---|---|
+| Model / prompt / temperature | `gemini-3.5-flash-lite` / v5 / 0.2; no fallback |
+| Time, tokens | 3.6 s (±0.5 s) request to finished job, including evaluation; 1,498 input, 960 output |
+| Model's changes | Step 6 only (`modified`, 5 → 10 litres), with a stated reason; all other items `unchanged` with an empty reason |
+| Evaluator v1.4 (structured) | `pass_automated`, 0 findings; warning recall and precision, step coverage, order integrity 1.0; unsupported rate 0.0; change applied |
+| Independent text comparison | Agrees: warnings word for word, order unchanged, only "5" → "10" differs |
+
+This is **one successful run, not an accuracy result**. It confirms that the live integration and prompt v5's per-change `reason` field work. With n = 1, an easy case and no model error to catch, it cannot measure the model's error rate or the evaluator's recall (the ceiling effect of EXP-002 again). The draft stays a draft: approval still needs a qualified reviewer's signed decision. Full record: `results/EXP-005_live_generation.md`.
+
 ## 6. Discussion and limitations
 
 - **The validation set is synthetic.** The standard-case scores show the rules work as designed; they are expected by construction. The held-out sets were written by the same team as the rules, who knew the target categories, so 21/24 shows generalisation within those categories, not to new kinds of error, and every case comes from the same 4 short SOPs.
@@ -135,21 +182,22 @@ On these short, well-structured SOPs, Gemini made no errors the framework detect
 - **Words, not meaning.** Paraphrases can raise false alarms. Meaning changes that keep the same words, beyond the fixed opposite-word list, are missed.
 - **Structure-dependent.** Steps must be numbered lines. Tables, multi-column layouts and scanned PDFs (no OCR) are not handled; they produce `needs_review`, not a pass.
 - **Order approximation.** Every source step pair is treated as order-critical, which over-flags harmless reorderings.
-- **Prototype security.** There are no user accounts; the system is intended for localhost use. Uploads are validated, SQL is parameterised, model output is escaped, and the API key is never logged.
+- **Security.** Sign-in with bcrypt passwords and expiring tokens, roles, throttled sign-in and approval signatures, a password change that ends older sessions, separation of duties and a hash-chained audit log. Uploads are validated, SQL is parameterised, model output is escaped, and the API key is never logged. Not built: per-document access control, SSO, or an external anchor for the audit chain head. See `docs/SECURITY.md`.
 - **No safety approval.** The framework cannot judge whether the requested change itself is safe.
 
 ## 7. Future work
 
 1. Evaluate the advisory semantic checker (`src/semantic_checker.py`: an NLI model or an LLM judge from a different provider than the generator; off by default, it can only add findings) against the EXP-003 human labels. It is never used for approval.
 2. Explicit dependency annotation (which steps must precede which), instead of treating all source order as critical.
-3. OCR and table extraction. Section- and step-scoped revision.
-4. Authenticated reviewers with roles.
+3. Table extraction, and a first real run of the OCR path (built, tested with a mock only).
+4. Human labelling of EXP-002 and the EXP-003 benchmark on public SOPs (the tooling is ready).
 
 ## 8. Reproducibility
 
 ```
 .venv\Scripts\python -m pytest -q tests
-.venv\Scripts\python evaluation\validate_evaluator.py
+.venv\Scripts\python evaluation\validate_evaluator.py testset-v3
+.venv\Scripts\python evaluation\baselines.py
 .venv\Scripts\python evaluation\make_charts.py
 .venv\Scripts\python evaluation\run_generation_experiment.py --repeats 3
 .venv\Scripts\python evaluation\agreement.py results\EXP-002_annotation.csv

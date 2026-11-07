@@ -2,12 +2,13 @@
 import hashlib
 import uuid
 
-from fastapi import APIRouter, Depends, Form, HTTPException
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 
 from app import config
 from app.audit import append_audit
 from app.auth import check_password, password_hash_of, require_role
 from app.db import connect_db, now
+from app.limits import check_login_allowed, clear_login_failures, record_login_failure
 from app.pagination import page_params, paginate
 from app.schemas import LOCKED_DETAIL, LOCKED_STATUSES, REVIEW_DECISIONS
 
@@ -17,6 +18,7 @@ router = APIRouter()
 @router.post("/api/versions/{version_id}/reviews")
 def create_review(
     version_id: str,
+    request: Request,
     decision: str = Form(...),
     feedback: str = Form("", max_length=config.MAX_FEEDBACK_CHARS),
     password: str = Form("", max_length=200),
@@ -35,9 +37,15 @@ def create_review(
             detail=f"Decision must be one of: {', '.join(sorted(REVIEW_DECISIONS))}.",
         )
 
-    if decision == "approved" and not check_password(password, password_hash_of(user["id"]) or ""):
-        # 403, not 401: a wrong signature must not look like an expired session.
-        raise HTTPException(status_code=403, detail="Re-enter your password to sign this approval.")
+    if decision == "approved":
+        # The signature is a password check, so it is throttled like sign-in.
+        client = request.client.host if request.client else "unknown"
+        check_login_allowed(reviewer, client)
+        if not check_password(password, password_hash_of(user["id"]) or ""):
+            record_login_failure(reviewer, client)
+            # 403, not 401: a wrong signature must not look like an expired session.
+            raise HTTPException(status_code=403, detail="Re-enter your password to sign this approval.")
+        clear_login_failures(reviewer)
 
     review_id = str(uuid.uuid4())
     created = now()

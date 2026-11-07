@@ -10,7 +10,7 @@ from app import config
 from app.auth import current_user, seed_admin
 from app.db import init_db
 from app.logging_setup import configure_logging
-from app.routers import audit, auth, documents, health, requests, reviews, versions
+from app.routers import audit, auth, documents, health, overview, requests, reviews, versions
 from app.services import jobs
 
 configure_logging()
@@ -58,5 +58,5 @@ async def log_requests(request: Request, call_next):
 app.include_router(health.router)  # public: liveness and evaluator status
 app.include_router(auth.router)    # login is public; the rest checks roles itself
 # Everything else needs a signed-in user; write endpoints add a role check of their own.
-for module in (documents, requests, versions, reviews, audit):
+for module in (documents, requests, versions, reviews, audit, overview):
     app.include_router(module.router, dependencies=[Depends(current_user)])

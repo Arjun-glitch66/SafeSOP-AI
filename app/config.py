@@ -39,6 +39,10 @@ JWT_SECRET = os.getenv("JWT_SECRET", "")
 TOKEN_MINUTES = int(os.getenv("TOKEN_MINUTES", "480"))  # one working day
 BCRYPT_ROUNDS = 12
 MIN_PASSWORD_LENGTH = 10
+# Failed sign-ins (and failed approval signatures) allowed per window before 429.
+LOGIN_MAX_FAILURES = int(os.getenv("LOGIN_MAX_FAILURES", "5"))                     # per username
+LOGIN_MAX_FAILURES_PER_CLIENT = int(os.getenv("LOGIN_MAX_FAILURES_PER_CLIENT", "20"))  # per client address
+LOGIN_WINDOW_SECONDS = int(os.getenv("LOGIN_WINDOW_SECONDS", "900"))               # 15 minutes
 # Seeded once at startup if no user with this name exists.
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")

@@ -50,6 +50,47 @@ def check_generate_allowed(username):
 
 
 def reset():
-    """Forget the per-minute windows (tests)."""
+    """Forget the per-minute windows and sign-in failures (tests)."""
     with _lock:
         _recent.clear()
+        _failures.clear()
+
+
+# ---- Sign-in and approval-signature throttling ----
+# ponytail: in-process like the per-minute window above (one API process). A failure limit per
+# username stops guessing one account's password; a looser limit per client address stops
+# spraying many accounts. A success clears that username's failures.
+_failures: defaultdict[str, deque[float]] = defaultdict(deque)
+
+
+def _recent_failures(key, now):
+    window = _failures[key]
+    while window and now - window[0] >= config.LOGIN_WINDOW_SECONDS:
+        window.popleft()
+    return window
+
+
+def check_login_allowed(username, client):
+    """Raise 429 (with Retry-After) while this username or client address has too many recent failures."""
+    now = time.monotonic()
+    limits = ((f"user:{username.strip().lower()}", config.LOGIN_MAX_FAILURES),
+              (f"client:{client}", config.LOGIN_MAX_FAILURES_PER_CLIENT))
+    with _lock:
+        for key, limit in limits:
+            window = _recent_failures(key, now)
+            if limit and len(window) >= limit:
+                retry = int(config.LOGIN_WINDOW_SECONDS - (now - window[0])) + 1
+                raise HTTPException(status_code=429, headers={"Retry-After": str(retry)},
+                                    detail=f"Too many failed attempts. Try again in {max(1, retry // 60)} minute(s).")
+
+
+def record_login_failure(username, client):
+    now = time.monotonic()
+    with _lock:
+        _failures[f"user:{username.strip().lower()}"].append(now)
+        _failures[f"client:{client}"].append(now)
+
+
+def clear_login_failures(username):
+    with _lock:
+        _failures.pop(f"user:{username.strip().lower()}", None)

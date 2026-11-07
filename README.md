@@ -7,14 +7,14 @@ Generative AI for automated SOP and work-instruction revision. Upload an existin
 ## How it works
 
 1. **Upload.** The original PDF is stored unchanged (SHA-256 recorded) and is never overwritten.
-2. **Generate.** The change request and the text of the original PDF (full document or one page) are sent to Gemini. Every generation, including a regeneration, uses the **original PDF** as its source. A regeneration records its parent version for lineage and passes the reviewers' comments on that parent to the model. Prompt v3 numbers the source's warnings (W1…) and steps (S1…), and the model returns JSON that cites those ids for every draft step and warning.
-3. **Evaluate.** Each draft is checked automatically (evaluator `safe-sop-eval-1.2`) for missing or altered warnings, unsupported instructions or values, step-order violations, omitted, duplicated or conflicting steps, steps that do what a warning forbids, weakened quantifiers (all → most, before → after), a changed person on lock/tag/verify steps, and change requests that were not applied. Prompt-v3 drafts are matched to the source by id; older drafts by text. Findings quote their evidence with line numbers (and the PDF page where known), and "Show in comparison" jumps to the line. Reviewers can mark each finding "true problem" or "false alarm"; `evaluation/export_finding_feedback.py` turns those into labelled data. A draft with no findings shows "No rule fired", never "safe". See [research_logbook/EVALUATION_FRAMEWORK.md](research_logbook/EVALUATION_FRAMEWORK.md).
+2. **Generate.** The change request and the text of the original PDF (full document or one page) are sent to Gemini. Every generation, including a regeneration, uses the **original PDF** as its source. A regeneration records its parent version for lineage and passes the reviewers' comments on that parent to the model. Since prompt v3 the source's warnings (W1…) and steps (S1…) are numbered, and the model returns JSON that cites those ids for every draft step and warning; prompt v5 (current) adds a stated reason for every change. See [docs/AI_PIPELINE.md](docs/AI_PIPELINE.md).
+3. **Evaluate.** Each draft is checked automatically (evaluator `safe-sop-eval-1.4`; 1.3 and 1.4 additions are listed below) for missing or altered warnings, unsupported instructions or values, step-order violations, omitted, duplicated or conflicting steps, steps that do what a warning forbids, weakened quantifiers (all → most, before → after), a changed person on lock/tag/verify steps, and change requests that were not applied. Prompt-v3 drafts are matched to the source by id; older drafts by text. Findings quote their evidence with line numbers (and the PDF page where known), and "Show in comparison" jumps to the line. Reviewers can mark each finding "true problem" or "false alarm"; `evaluation/export_finding_feedback.py` turns those into labelled data. A draft with no findings shows "No rule fired", never "safe". See [research_logbook/EVALUATION_FRAMEWORK.md](research_logbook/EVALUATION_FRAMEWORK.md).
    - Optional **advisory semantic check** (`SEMANTIC_CHECK=nli|llm`, off by default): an NLI model or a Claude judge looks for draft steps that contradict a warning in different words. It can only add findings marked "advisory" and raise the status; it never lowers it. See `src/semantic_checker.py` and `TODO_HUMAN.md` before switching it on.
 4. **Review.** A signed-in reviewer approves the version, rejects it, or marks it as needing revision. Approval is an electronic signature: the reviewer re-enters their password, and the decision records the evaluator version, the source PDF's SHA-256 and the approved text's SHA-256. Nobody can approve a version they generated. An **approved version is locked**: any later review is refused (HTTP 409); changes go into a new version.
 
 ### Users, roles and the audit log
 
-Everyone signs in. Roles: **author** (upload, change requests, generate), **reviewer** (review decisions, finding verdicts), **admin** (everything, plus `POST /api/users`). The first admin is created from `ADMIN_USERNAME` / `ADMIN_PASSWORD` at startup; create other users through `/docs` (`POST /api/users`) while signed in as admin.
+Everyone signs in. Roles: **author** (upload, change requests, generate), **reviewer** (review decisions, finding verdicts), **admin** (everything, plus `POST /api/users`). The first admin is created from `ADMIN_USERNAME` / `ADMIN_PASSWORD` at startup; create other users, change roles and reset passwords on the **Users** page (admin), and change your own password on **Account**.
 
 Uploads, generations, reviews and user creation are written to an append-only, hash-chained `audit_events` table in the same database transaction. `GET /api/audit/verify` recomputes the chain and names the first event that does not check out.
 
@@ -92,7 +92,7 @@ Terminal 2:
 cd frontend
 npm run dev
 ```
-Open http://localhost:5173 and sign in. Pages: `/documents`, `/documents/:id`, `/versions/:id`, `/versions/:id/review`, `/checks`. The API docs are at http://127.0.0.1:8000/docs.
+Open http://localhost:5173 and sign in. Pages: `/dashboard`, `/documents`, `/documents/:id`, `/versions/:id`, `/versions/:id/review`, `/checks`, `/account`, and for admins `/users` and `/audit`. The API docs are at http://127.0.0.1:8000/docs.
 
 On every start the API runs the Alembic migrations (`migrations/`). A database created before Alembic is first upgraded in place (after a backup to `data/backups/`) and then stamped. No data is deleted. To migrate by hand: `alembic upgrade head`.
 
@@ -120,14 +120,27 @@ Open http://localhost:8080. The API image includes Tesseract for scanned PDFs. `
 - **Comparison:** version against version, and an original-PDF preview pane.
 - **Dark mode** and self-hosted fonts.
 
+### Added in the completion phase (2026-11-06)
+
+See [PROJECT_COMPLETION_AUDIT.md](PROJECT_COMPLETION_AUDIT.md) for the audit and the results before and after.
+
+- **Prompt v5:** every changed step and warning carries the model's stated reason, shown as a CHANGE LOG and in a "What changed and why" panel. Unusable output is asked for once more before the fallback.
+- **Evaluator v1.4:** signal-word downgrades (DANGER → CAUTION), values changed to another source value of the same unit, unexplained changes; warning precision and lexical consistency metrics.
+- **Dashboard, Users, Audit log, Account pages:** live counts and review queue; admins create users, change roles and reset passwords; audit chain verification in the UI; change your own password.
+- **Security:** throttled sign-in and approval signatures (429), sessions end when a password changes, last admin cannot be demoted, encrypted PDFs refused, nginx security headers. See [docs/SECURITY.md](docs/SECURITY.md).
+- **Fixes:** hashes in exported PDFs now copy exactly (they were printed with ligatures); "Re-run checks" on section/step drafts no longer reports false omissions.
+- **EXP-004:** the evaluator compared with simple baselines.
+- **Docs:** [architecture, schema and API](docs/ARCHITECTURE.md), [AI pipeline and prompts](docs/AI_PIPELINE.md), [security and deployment checklist](docs/SECURITY.md).
+
 ## Test and evaluate
 
 ```
-.venv\Scripts\python -m pytest -q                                           # 154 tests, Gemini stubbed
+.venv\Scripts\python -m pytest -q                                           # 183 tests, Gemini stubbed
 .venv\Scripts\pip install -r requirements-dev.txt                          # ruff, mypy, pip-audit, pytest-cov
 .venv\Scripts\ruff check . ; .venv\Scripts\mypy ; .venv\Scripts\python -m pytest --cov
 cd frontend ; npm run lint ; npm test ; npm run test:coverage
-.venv\Scripts\python evaluation\validate_evaluator.py                      # EXP-001c (64 cases), no API key needed
+.venv\Scripts\python evaluation\validate_evaluator.py testset-v3           # EXP-001d (70 cases), no API key needed
+.venv\Scripts\python evaluation\baselines.py                               # EXP-004, evaluator vs simple baselines
 .venv\Scripts\python evaluation\make_charts.py                             # figures in results\charts
 .venv\Scripts\python evaluation\run_generation_experiment.py --repeats 3   # EXP-002, needs Gemini key
 .venv\Scripts\python evaluation\agreement.py results\EXP-002_annotation.csv # after human labelling
@@ -172,7 +185,9 @@ GitHub Actions (`.github/workflows/ci.yml`) runs the tests, EXP-001 and the fron
 - OCR needs Tesseract on the server (included in the Docker image). All outputs are text and do not reproduce the PDF layout.
 - Sections are detected by shape (ALL-CAPS or "Title:" lines); SOPs styled differently show no sections and keep full/page scope.
 - The evaluator compares words, not meaning. v1.1 added opposite words (on/off, open/close, …) and unit changes (rpm → rcf); v1.2 adds warning contradictions, quantifier, actor and change-applied checks, all from word lists. It still misses meaning changes outside those lists (3 of 24 held-out cases, e.g. "any" → "most"), flags some correct paraphrases for review, and has not been measured on real model errors yet. See the logbook, entries 2, 4 and 9.
-- Sign-in has no password reset, account lockout or login rate limit yet, and users are managed through the API only. Keep it on a trusted network.
+- Sign-in is password-only (no MFA or SSO), and the sign-in throttle lives in the API process. There is no per-document access control: every signed-in user can read every SOP. Keep it on a trusted network or behind TLS (see docs/SECURITY.md).
+- Prompt v5 and evaluator v1.4 have been run on live Gemini output once through the API (EXP-005) and three times through the browser (logbook entry 14). All were easy synthetic cases, every change had a reason, and there were no warning or critical findings. These are functional checks, not an accuracy result. EXP-002 still needs its human labels.
+- The browser test (125/125 checks, 2026-11-07) used headless Chrome at desktop width only. Phone layouts, Firefox and Safari, screen readers, actual PDF rendering in the preview, and the security headers of the Docker/nginx build have not been tested.
 - Background jobs and the per-minute rate limit live in the API process: run one API process (scale up, not out) until they move to Redis or Postgres.
 - Postgres support, the Docker images and OCR were not run on the development machine (see TODO_HUMAN.md).
 - PyMuPDF is AGPL-licensed; see TODO_HUMAN.md before offering the app as a service.

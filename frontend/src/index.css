@@ -484,3 +484,16 @@ h1, h2, h3 { font-family: var(--font-display); font-stretch: 112%; letter-spacin
 .compare-bar .field-label { margin: 0; align-self: center; }
 .compare-bar .form-input { width: auto; min-width: 180px; }
 .pdf-preview { width: 100%; height: 70vh; margin-bottom: 16px; border: 1px solid var(--rule); border-radius: 8px; background: var(--paper); }
+
+/* The user chip links to /account; keep it looking like a chip. */
+a.user-chip { text-decoration: none; color: inherit; }
+a.user-chip:hover { text-decoration: underline; }
+/* Hashes (audit head) are one long word: let them wrap on narrow screens. */
+.notice-banner code { word-break: break-all; font-size: 0.85em; }
+
+/* Tables of free text (change log reasons, audit details): wrap long cells instead of hiding them
+   behind a horizontal scroll, and do not look clickable. */
+.data-table.text-table td { vertical-align: top; }
+.data-table.text-table td.wrap { white-space: normal; overflow-wrap: anywhere; min-width: 16ch; }
+.data-table.text-table tbody tr { cursor: default; }
+.data-table.text-table tbody tr:hover { background: transparent; }

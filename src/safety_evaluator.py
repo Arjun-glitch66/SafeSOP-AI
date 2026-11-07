@@ -192,7 +192,9 @@ def evaluate_sop(
 # Earlier versions are reproducible from git: each results/evaluator_validation_<version>*.json
 # records the commit it ran on.
 # 1.3: required-element checklists (src/checklists) and hierarchy-of-controls downgrades.
-EVALUATOR_VERSION = "safe-sop-eval-1.3"
+# 1.4: signal-word downgrades (DANGER -> CAUTION), values changed to another value of the same
+#      unit, unexplained changes (prompt v5 reasons), warning precision and lexical consistency.
+EVALUATOR_VERSION = "safe-sop-eval-1.4"
 
 MATCH_THRESHOLD = 0.8      # at or above: preserved / matched
 PARTIAL_THRESHOLD = 0.5    # between partial and match: altered, needs review
@@ -522,9 +524,10 @@ def check_change_applied(change_request, original_text, draft):
     }]
 
 
-def meaning_findings(source, draft_text, label, change_words):
+def meaning_findings(source, draft_text, label, change_words, values=None):
     """Polarity flips and opposite words (v1.1), then weakened quantifiers and changed actors
-    (v1.2), for one matched source/draft pair."""
+    (v1.2), control downgrades (v1.3), signal-word downgrades and changed values (v1.4),
+    for one matched source/draft pair. `values` is value_context(); without it values are not compared."""
     findings = []
     if has_negation(source) != has_negation(draft_text):
         findings.append({"type": "conflicting_instruction", "severity": "critical",
@@ -537,8 +540,78 @@ def meaning_findings(source, draft_text, label, change_words):
                          "detail": f"{label} says '{new}' where the source says '{old}'."
                                    + (" The change request mentions it; confirm." if requested else ""),
                          "source": source, "draft": draft_text})
-    return (findings + check_quantifier(source, draft_text, change_words, flips)
-            + check_actor(source, draft_text, change_words) + check_control_downgrade(source, draft_text, change_words))
+    findings += check_quantifier(source, draft_text, change_words, flips)
+    findings += check_actor(source, draft_text, change_words) + check_control_downgrade(source, draft_text, change_words)
+    if label == "Warning":
+        findings += check_signal_word(source, draft_text, change_words)
+    if values is not None:
+        findings += check_value_change(source, draft_text, values)
+    return findings
+
+
+# v1.4 signal words (ANSI Z535 / ISO 3864 order): a matched warning must not drop to a weaker one.
+# The labels are stop-words, so token overlap cannot see "DANGER:" become "CAUTION:".
+SIGNAL_RANK = {"danger": 3, "warning": 2, "caution": 1, "notice": 0, "note": 0}
+SIGNAL_WORD = re.compile(r"^\W*(danger|warning|caution|notice|note)\b", re.IGNORECASE)
+
+
+def signal_word(text):
+    match = SIGNAL_WORD.match(text or "")
+    return match.group(1).lower() if match else None
+
+
+def check_signal_word(source, draft_text, change_words):
+    """DANGER -> WARNING/CAUTION/NOTE (and so on) is a weaker hazard statement: high, or review
+    if the change request names the new word. A label dropped altogether is review."""
+    old = signal_word(source)
+    if old is None:
+        return []
+    new = signal_word(draft_text)
+    if new is None:
+        return [{"type": "warning_downgraded", "severity": "review",
+                 "detail": f"The {old.upper()} label was removed from this warning; confirm it is still "
+                           "presented as a hazard.",
+                 "source": source, "draft": draft_text, "evidence": f"{old.upper()} -> no label"}]
+    if SIGNAL_RANK[new] >= SIGNAL_RANK[old]:
+        return []
+    requested = new in change_words
+    return [{"type": "warning_downgraded", "severity": "review" if requested else "high",
+             "detail": f"Signal word lowered from {old.upper()} to {new.upper()}."
+                       + (" The change request mentions it; confirm." if requested else ""),
+             "source": source, "draft": draft_text, "evidence": f"{old.upper()} -> {new.upper()}"}]
+
+
+def value_context(original_text, change_request):
+    """What check_value_change() compares against: the source's numbers and units, and the change request's."""
+    known_units = {}
+    for number, unit in value_units(original_text):
+        known_units.setdefault(number, set()).add(unit)
+    return {"source_numbers": set(NUMBER.findall(original_text)), "known_units": known_units,
+            "change_numbers": set(NUMBER.findall(change_request)), "change_pairs": value_units(change_request)}
+
+
+def check_value_change(source, draft_text, values):
+    """A matched line whose value changed to another value the source already uses with the same
+    unit (or both unitless), e.g. 'wait 5 minutes' -> 'wait 10 minutes' when another step says
+    10 minutes. New numbers and unit swaps are left to unsupported_value; values the change
+    request gives (with their unit, when they have one) are the requested change."""
+    old_pairs, new_pairs = value_units(source), value_units(draft_text)
+    old_numbers, new_numbers = set(NUMBER.findall(source)), set(NUMBER.findall(draft_text))
+    if not old_numbers - new_numbers:
+        return []  # nothing in the source line was replaced
+    changed = {f"{n} {u}" for n, u in new_pairs - old_pairs
+               if (n, u) not in values["change_pairs"] and u in values["known_units"].get(n, set())}
+    with_unit = {n for n, _ in new_pairs}
+    changed |= {n for n in new_numbers - old_numbers - with_unit
+                if n in values["source_numbers"] and n not in values["change_numbers"]}
+    if not changed:
+        return []
+    removed = sorted(old_numbers - new_numbers)
+    return [{"type": "value_changed", "severity": "critical",
+             "detail": "A value in this line was changed to another value used elsewhere in the source, "
+                       "and the change request does not give it.",
+             "source": source, "draft": draft_text,
+             "evidence": f"{', '.join(removed)} -> {', '.join(sorted(changed))}"}]
 
 
 # v1.3 hierarchy of controls: elimination > substitution > engineering > administrative > PPE.
@@ -580,7 +653,26 @@ def _matches(pattern, text):
     return [match.group(0) for match in pattern.finditer(text)]
 
 
-LOCATED_TYPES = {"quantifier_weakened", "actor_changed", "control_downgraded"}  # types that carry line numbers in the text path
+LOCATED_TYPES = {"quantifier_weakened", "actor_changed", "control_downgraded", "warning_downgraded", "value_changed"}  # types that carry line numbers in the text path
+
+
+def warning_precision_of(draft_warnings, source_warnings, change_tokens):
+    """Share of the draft's warnings that are supported: at least tau_partial of a draft warning's
+    content words come from one source warning or from the change request. None without draft
+    warnings. An unsupported warning is not a finding (an extra warning is not unsafe), only a metric."""
+    if not draft_warnings:
+        return None
+    source_tokens = [tokens(w) for w in source_warnings]
+    supported = 0
+    for warning in draft_warnings:
+        own = tokens(warning)
+        support = max([containment(own, s) for s in source_tokens] + [containment(own, change_tokens)])
+        supported += support >= PARTIAL_THRESHOLD
+    return round(supported / len(draft_warnings), 4)
+
+
+def mean(values):
+    return round(sum(values) / len(values), 4) if values else None
 
 
 def line_number(lines, text):
@@ -623,9 +715,11 @@ def evaluate_revision(original_text, generated_text, change_request="", document
         findings.append(finding)
 
     change_words = plain_words(change_request)
+    values = value_context(original_text, change_request)
+    matched_scores = []  # Dice of each matched source step with its draft step (lexical consistency)
 
     def check_conflict(source, draft_text, label):
-        for finding in meaning_findings(source, draft_text, label, change_words):
+        for finding in meaning_findings(source, draft_text, label, change_words, values):
             if finding["type"] in LOCATED_TYPES:
                 add_located(finding)
             else:
@@ -674,6 +768,7 @@ def evaluate_revision(original_text, generated_text, change_request="", document
 
         draft_step = draft_steps[index]
         positions.append((step, index))
+        matched_scores.append(score)
         if score >= MATCH_THRESHOLD:
             matched_steps += 1
         else:
@@ -749,10 +844,14 @@ def evaluate_revision(original_text, generated_text, change_request="", document
     def ratio(numerator, denominator):
         return round(numerator / denominator, 4) if denominator else None
 
+    draft_warnings = extract_warnings(draft)
     metrics = {
         "source_warnings": len(source_warnings),
         "warning_recall": ratio(preserved, len(source_warnings)),
         "warning_recall_lenient": ratio(preserved + altered, len(source_warnings)),
+        "draft_warnings": len(draft_warnings),
+        "warning_precision": warning_precision_of(draft_warnings, source_warnings, change_tokens),
+        "lexical_consistency": mean(matched_scores),
         "source_steps": len(source_steps),
         "draft_steps": len(draft_steps),
         "step_coverage": ratio(matched_steps + altered_steps, len(source_steps)),
@@ -766,6 +865,8 @@ def evaluate_revision(original_text, generated_text, change_request="", document
         "contradicted_warnings": sum(f["type"] == "contradicts_warning" for f in findings),
         "weakened_quantifiers": sum(f["type"] == "quantifier_weakened" for f in findings),
         "actor_changes": sum(f["type"] == "actor_changed" for f in findings),
+        "downgraded_warnings": sum(f["type"] == "warning_downgraded" for f in findings),
+        "changed_values": sum(f["type"] == "value_changed" for f in findings),
         "change_applied": not any(f["type"] == "change_not_applied" for f in findings) if change_request.strip() else None,
     }
 
@@ -811,6 +912,8 @@ def evaluate_structured_revision(original_text, generated_text, structured, chan
     source_warnings, source_steps = number_source_items(original_text)
     warning_text, step_text = dict(source_warnings), dict(source_steps)
     change_words, change_tokens = plain_words(change_request), tokens(change_request)
+    values = value_context(original_text, change_request)
+    matched_scores = []
     removed_ids = set(structured.get("removed_warning_ids") or [])
     steps = [s for s in structured.get("steps") or []]
     kept_steps = [s for s in steps if s.get("change_type") != "removed"]
@@ -864,7 +967,7 @@ def evaluate_structured_revision(original_text, generated_text, structured, chan
             altered += 1
             add(finding("altered_warning", "review", "Warning wording changed; confirm the meaning is unchanged.",
                         source=text, draft=carrier["text"], score=round(score, 2)), warning_id, carrier.get("id"))
-        for item in meaning_findings(text, carrier["text"], "Warning", change_words):
+        for item in meaning_findings(text, carrier["text"], "Warning", change_words, values):
             add(item, warning_id, carrier.get("id"))
 
     # 2. Steps: every source step must be accounted for exactly where the model says it went.
@@ -887,6 +990,7 @@ def evaluate_structured_revision(original_text, generated_text, structured, chan
         positions.append((step_id, kept_steps.index(holder)))
         source_tokens, draft_tokens = tokens(text), tokens(holder["text"])
         score = dice(source_tokens, draft_tokens)
+        matched_scores.append(score)
         if score >= MATCH_THRESHOLD:
             matched_steps += 1
         else:
@@ -901,7 +1005,7 @@ def evaluate_structured_revision(original_text, generated_text, structured, chan
             else:
                 add(finding("altered_step", "review", "Step wording changed beyond the change request.",
                             source=text, draft=holder["text"], score=round(score, 2)), step_id, holder.get("id"))
-        for item in meaning_findings(text, holder["text"], "Step", change_words):
+        for item in meaning_findings(text, holder["text"], "Step", change_words, values):
             add(item, step_id, holder.get("id"))
 
     # 3. Order of the source steps that were kept
@@ -965,6 +1069,20 @@ def evaluate_structured_revision(original_text, generated_text, structured, chan
     for item in check_change_applied(change_request, original_text, draft):
         add(item)
 
+    # 7. v1.4: prompt v5 asks for a reason on every change. Older drafts have no "reason" key and are skipped.
+    unexplained = 0
+    for step in steps:
+        if "reason" in step and step.get("change_type") != "unchanged" and not (step.get("reason") or "").strip():
+            unexplained += 1
+            add(finding("unexplained_change", "review",
+                        f"The draft marks this step '{step.get('change_type')}' without giving a reason.",
+                        draft=step.get("text")), None, step.get("id"))
+    for warning in warnings:
+        if "reason" in warning and not warning.get("source_warning_id") and not (warning.get("reason") or "").strip():
+            unexplained += 1
+            add(finding("unexplained_change", "review", "The draft adds this warning without giving a reason.",
+                        draft=warning.get("text")), None, warning.get("id"))
+
     def ratio(numerator, denominator):
         return round(numerator / denominator, 4) if denominator else None
 
@@ -973,6 +1091,11 @@ def evaluate_structured_revision(original_text, generated_text, structured, chan
         "source_warnings": len(source_warnings),
         "warning_recall": ratio(preserved, len(source_warnings)),
         "warning_recall_lenient": ratio(preserved + altered, len(source_warnings)),
+        "draft_warnings": len(warnings),
+        "warning_precision": warning_precision_of([w["text"] for w in warnings], [t for _, t in source_warnings],
+                                                  change_tokens),
+        "lexical_consistency": mean(matched_scores),
+        "unexplained_changes": unexplained,
         "removed_warnings": sum(f["type"] == "warning_removed" for f in findings),
         "source_steps": len(source_steps),
         "draft_steps": len(kept_steps),
@@ -987,6 +1110,8 @@ def evaluate_structured_revision(original_text, generated_text, structured, chan
         "contradicted_warnings": sum(f["type"] == "contradicts_warning" for f in findings),
         "weakened_quantifiers": sum(f["type"] == "quantifier_weakened" for f in findings),
         "actor_changes": sum(f["type"] == "actor_changed" for f in findings),
+        "downgraded_warnings": sum(f["type"] == "warning_downgraded" for f in findings),
+        "changed_values": sum(f["type"] == "value_changed" for f in findings),
         "change_applied": not any(f["type"] == "change_not_applied" for f in findings) if change_request.strip() else None,
     }
     checklist_findings, metrics["required_elements"] = check_required_elements(document_type, original_lines, draft_lines)

@@ -80,6 +80,15 @@ async def upload_document(file: UploadFile = File(...), document_type: str = For
         try:
             with pymupdf.open(stored_path) as pdf:
                 page_count = len(pdf)
+                needs_password = pdf.needs_pass
+        except Exception:
+            raise HTTPException(status_code=400, detail="The PDF could not be opened.") from None
+        if needs_password:
+            # Its text cannot be read, so every later generation would fail. Refuse it now.
+            raise HTTPException(status_code=400, detail="The PDF is password-protected. Upload an unprotected copy.")
+        if page_count == 0:
+            raise HTTPException(status_code=400, detail="The PDF has no pages.")
+        try:
             ocr_pages = pages_needing_ocr(stored_path)
         except Exception:
             raise HTTPException(status_code=400, detail="The PDF could not be opened.") from None

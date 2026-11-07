@@ -22,6 +22,7 @@ LANGUAGES = {
 TRANSLATION_TYPES = {
     "missing_warning", "altered_warning", "omitted_step", "step_order_violation", "conflicting_instruction",
     "unsupported_value", "quantifier_weakened", "actor_changed", "contradicts_warning", "control_downgraded",
+    "warning_downgraded", "value_changed",
 }
 
 
@@ -43,7 +44,7 @@ def _translate(text, source, target):
 
     def complete(result):
         if not isinstance(result["parsed"], TranslatedText) or not result["parsed"].text.strip():
-            raise RuntimeError("The translation came back empty or incomplete.")
+            raise llm_client.OutputValidationError("The translation came back empty or incomplete.")
 
     result = llm_client.generate(prompt, TranslatedText, system_instruction=system, temperature=0.0, validate=complete)
     return result["parsed"].text.strip()

@@ -1,6 +1,6 @@
-# SAFE-SOP Evaluation Framework (v1.3)
+# SAFE-SOP Evaluation Framework (v1.4)
 
-Implementation: `src/safety_evaluator.py` → `evaluate_revision()` · version tag `safe-sop-eval-1.3`
+Implementation: `src/safety_evaluator.py` → `evaluate_revision()` (text path) and `evaluate_structured_revision()` (prompt v3+ JSON) · version tag `safe-sop-eval-1.4`
 
 | Version | Change | Evidence |
 |---|---|---|
@@ -8,6 +8,7 @@ Implementation: `src/safety_evaluator.py` → `evaluate_revision()` · version t
 | 1.1 | Added the opposite-word check (§2.5) and the number+unit check (§2.4); merged steps are no longer counted as an order reversal (§2.3) | EXP-001b (logbook entry 4) |
 | 1.3 | Required-element checklists per SOP type (§2.8) and hierarchy-of-controls downgrades (§2.8); EXP-001c unchanged (0.938) | Logbook entry 11 |
 | 1.2 | Added warning-contradiction, quantifier, actor and change-applied checks (§2.6); `all`, `any`, `each`, `before`, `after` are no longer stop-words; new `high` severity | EXP-001c (logbook entry 9) |
+| 1.4 | Signal-word downgrades, same-unit value changes, unexplained changes (prompt v5), warning precision and lexical consistency (§2.9); metric reference (§2.10) | EXP-001d and EXP-004 (logbook entry 12); one live draft in EXP-005 (entry 13) |
 
 This framework checks an AI-generated SOP draft against the **immutable original SOP** and the **engineer's change request**. It does not decide whether a procedure is safe. It decides whether the draft shows evidence of specific, well-defined failure types. Only a qualified human reviewer can approve a draft.
 
@@ -139,6 +140,40 @@ Opposite words, quantifier, actor, value, unit, duplicate, order and change-appl
 
 Both are word lists: a reworded element or control can be missed, or flagged for review.
 
+### 2.9 Signal words, changed values and unexplained changes (v1.4)
+
+| Finding | Severity | Rule |
+|---|---|---|
+| `warning_downgraded` | high; review if the change request names the new word; review if the label is removed | A matched source/draft **warning** pair whose leading signal word drops in rank: DANGER (3) > WARNING (2) > CAUTION (1) > NOTICE, NOTE (0), as in ANSI Z535 / ISO 3864. The labels are stop-words (§1.1), so the overlap scores of §2.1 cannot see this. Only lines that start with a label are compared. |
+| `value_changed` | critical | In a matched pair, a number of the source line is gone, and the draft line uses a number that (a) the source already uses **with the same unit** elsewhere (or, unitless, anywhere), and (b) the change request does not give (with that unit, when it has one). Example: "Cure for 30 minutes" → "Cure for 10 minutes" when another step says "10 minutes". New numbers and unit swaps are left to `unsupported_value` (§2.4), so nothing is reported twice. |
+| `unexplained_change` | review | Structured path, prompt v5 only (drafts with a `reason` field): a step marked `modified`, `added` or `removed`, or a new warning, whose `reason` is empty. Older drafts have no `reason` field and are skipped, not flagged. The reason itself is the model's claim; it is shown to the reviewer, never checked for truth. |
+
+### 2.10 Metric reference
+
+Notation as in §2: *W* source warnings, *S* source steps, *D* draft steps, *D_W* draft warning lines, *C* the change request. Every ratio is `null` when its denominator is 0, never 100 %.
+
+| Metric (key) | Definition | Formula | Inputs | Output | Limitations |
+|---|---|---|---|---|---|
+| Warning recall (`warning_recall`) | Share of source warnings kept with ≥ 80 % of their content words in one draft line (text path) or in the draft warning citing them (structured path) | preserved / \|W\| | *O*, *G* (and the JSON on the structured path) | [0, 1] or null | Words, not meaning: a paraphrase can count as altered; a reversed warning that keeps its words counts as preserved and is caught by §2.5/§2.6 instead |
+| Lenient warning recall (`warning_recall_lenient`) | As above, counting altered (≥ 50 %) warnings as kept | (preserved + altered) / \|W\| | same | [0, 1] or null | An upper bound; altered warnings still need review |
+| Warning precision (`warning_precision`) | Share of draft warnings that are supported: ≥ 50 % of their content words come from one source warning or from *C* | \|{d ∈ D_W : max(max_w cont(d, w), cont(d, C)) ≥ τ_partial}\| / \|D_W\| | *O*, *C*, *G* | [0, 1] or null | Metric only, never a finding (an extra warning is not unsafe). Does not judge whether a new warning is *correct*. |
+| Unsupported instruction rate (`unsupported_instruction_rate`) | Share of draft steps (structured path: added steps) mostly not found in any one source line plus *C* | §2.4 | *O*, *C*, *G* | [0, 1] or null | A correct step in new words looks unsupported; a wrong step built from source words looks supported |
+| Unsupported values (`unsupported_values`) | Numbers in draft steps/warnings not in *O* or *C*, plus same-number-different-unit pairs | §2.4 | *O*, *C*, *G* | count | Units from a fixed list only |
+| Changed values (`changed_values`) | `value_changed` findings | §2.9 | *O*, *C*, matched pairs | count | Only matched pairs; a number moved to an unmatched line is not compared |
+| Step coverage (`step_coverage`) | Share of source steps found (Dice ≥ 0.5) or cited by id | found / \|S\| | *O*, *G* | [0, 1] or null | Needs numbered steps in the source |
+| Order integrity (`order_integrity`) | Share of found source-step pairs that keep their order | §2.3 | *O*, *G* | [0, 1] or null | Treats every pair as order-critical (over-flags independent steps) |
+| Safety-constraint preservation | Not one number: `contradicts_warning` (§2.6), `missing_required_element` and `control_downgraded` (§2.8) findings; `contradicted_warnings` and `required_elements.required_elements_lost` count them | — | *O*, *G*, document type | counts | Prohibitions must have the "do not / never + verb + object" shape; checklists exist for two SOP types only |
+| Lexical consistency (`lexical_consistency`) | Mean Dice similarity of each found source step with its draft step | mean over found s of dice(s, d_s) | *O*, *G* | [0, 1] or null | **Lexical, not semantic.** Averaged over found steps only (omissions are in `step_coverage`). 1.0 means the words were kept, not that the meaning was. The semantic checker (`SEMANTIC_CHECK`) is the only meaning-level check and is unevaluated. |
+| Duplicated steps (`duplicated_steps`) | Pairs of draft steps with Dice ≥ 0.9 | §2.2 | *G* | count | Legitimately repeated steps are flagged for review |
+| Contradictory instructions (`conflicting_instructions`, `contradicted_warnings`) | Negation flips and opposite-word swaps in matched pairs; draft steps doing what a source warning forbids | §2.2, §2.5, §2.6 | *O*, *C*, *G* | counts | Word lists |
+| Weakened quantifiers (`weakened_quantifiers`) | Strong → weak quantity/timing word in a matched pair | §2.6 | *O*, *C*, *G* | count | Word lists ("any" → "most" is missed: HARD-ANY-TO-MOST) |
+| Changed responsible persons (`actor_changes`) | Performer of a lock/tag/verify/permit line changed | §2.6 | *O*, *C*, *G* | count | Only those line types and listed role words |
+| Missing or weakened warnings | `missing_warning`, `warning_removed`, `altered_warning`, `warning_downgraded`, polarity and quantifier findings on warnings; `downgraded_warnings` counts the signal-word ones | §2.1, §2.7, §2.9 | *O*, *G* | findings, counts | As above |
+| Unexplained changes (`unexplained_changes`) | Changed items without a stated reason | §2.9 | JSON (prompt v5) | count | Presence of a reason only, not its truth |
+| Change applied (`change_applied`) | Whether any new value/term of *C* appears in the draft | §2.6 | *O*, *C*, *G* | true / false / null | Removal requests leave no trace (HARD-CHANGE-DROPPED-VALUE is missed) |
+
+None of these metrics is a ground-truth label. They are rule outputs; their agreement with human labels is measured separately (§6, `evaluation/agreement.py`).
+
 ## 3. Decision rule
 
 | Status | Condition |
@@ -209,3 +244,5 @@ The source-item format above cannot record content the model *added*. From EXP-0
 4. **Dependencies are approximated by source order.** Every pair of source steps is treated as order-critical, which over-flags harmless reorderings of independent steps.
 5. **Synthetic validation set.** EXP-001 drafts were built with known edits, so it shows that each rule fires as designed. It does not show how often real LLM errors look like these edits. Real-world performance comes from EXP-002 with human annotation.
 6. **Not a safety approval.** The framework cannot judge whether a requested change is itself safe.
+7. **v1.4 rules are validated on development cases only.** The six `hard-dev-v1.4` cases were written by the same author immediately before the rules and drove their design, so 6/6 is expected, not evidence. The value rule is exercised only by unit tests: none of the four test-set SOPs uses one value twice with the same unit. What EXP-001d does show is that v1.4 changes no result on the 64 earlier cases. v1.4 has run on one real model draft (EXP-005): it reported no findings, and an independent text comparison found no defect either. That run contained no error for any rule to catch, so it adds no evidence on detection accuracy.
+8. **Model-stated reasons are not verified.** `unexplained_change` checks that a reason exists, not that it is true.

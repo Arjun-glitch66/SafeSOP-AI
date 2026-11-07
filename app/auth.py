@@ -4,6 +4,7 @@ Roles: author (uploads, requests, generates), reviewer (records review decisions
 admin (everything, plus user management). Admin satisfies every role check but is still
 bound by the separation-of-duties rule in the reviews router.
 """
+import hashlib
 import logging
 import secrets
 import uuid
@@ -39,13 +40,23 @@ def check_password(password, password_hash):
     return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("ascii"))
 
 
-def create_user(username, password, role, created_by):
-    username = username.strip()
+def check_role(role):
     if role not in ROLES:
         raise HTTPException(status_code=400, detail=f"Role must be one of: {', '.join(ROLES)}.")
-    if not username or len(password) < config.MIN_PASSWORD_LENGTH:
+
+
+def check_new_password(password):
+    if len(password) < config.MIN_PASSWORD_LENGTH:
         raise HTTPException(status_code=400,
-                            detail=f"Enter a username and a password of at least {config.MIN_PASSWORD_LENGTH} characters.")
+                            detail=f"The password must have at least {config.MIN_PASSWORD_LENGTH} characters.")
+
+
+def create_user(username, password, role, created_by):
+    username = username.strip()
+    check_role(role)
+    if not username:
+        raise HTTPException(status_code=400, detail="Enter a username.")
+    check_new_password(password)
     user = {"id": str(uuid.uuid4()), "username": username, "role": role}
     password_hash = hash_password(password)
     with connect_db() as connection:
@@ -106,9 +117,16 @@ def _dummy_hash():
 _DUMMY = None
 
 
+def password_version(password_hash):
+    """A short fingerprint of the stored hash. Tokens carry it, so changing or resetting a
+    password ends every session issued before the change (no extra table needed)."""
+    return hashlib.sha256(password_hash.encode("ascii")).hexdigest()[:16]
+
+
 def issue_token(user):
     expires = datetime.now(timezone.utc) + timedelta(minutes=config.TOKEN_MINUTES)
-    return jwt.encode({"sub": user["id"], "exp": expires}, jwt_secret(), algorithm="HS256")
+    claims = {"sub": user["id"], "exp": expires, "pwv": password_version(password_hash_of(user["id"]) or "")}
+    return jwt.encode(claims, jwt_secret(), algorithm="HS256")
 
 
 def current_user(credentials: HTTPAuthorizationCredentials | None = Depends(_bearer)):
@@ -122,10 +140,11 @@ def current_user(credentials: HTTPAuthorizationCredentials | None = Depends(_bea
     except jwt.PyJWTError:
         raise unauthorised from None
     with connect_db() as connection:
-        row = connection.execute("SELECT id, username, role FROM users WHERE id = ?", (claims.get("sub"),)).fetchone()
-    if not row:
-        raise unauthorised
-    return dict(row)
+        row = connection.execute("SELECT id, username, role, password_hash FROM users WHERE id = ?",
+                                 (claims.get("sub"),)).fetchone()
+    if not row or claims.get("pwv") != password_version(row["password_hash"]):
+        raise unauthorised  # unknown user, or the password changed after this token was issued
+    return {"id": row["id"], "username": row["username"], "role": row["role"]}
 
 
 def require_role(*roles):
@@ -135,3 +154,36 @@ def require_role(*roles):
             raise HTTPException(status_code=403, detail=f"This needs the {' or '.join(roles)} role.")
         return user
     return dependency
+
+
+def set_password(user_id, new_password, actor, action):
+    """Store a new password hash and audit it (never the password). Ends the user's other sessions."""
+    check_new_password(new_password)
+    password_hash = hash_password(new_password)
+    with connect_db() as connection:
+        connection.lock_writes()
+        row = connection.execute("SELECT username FROM users WHERE id = ?", (user_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="User not found.")
+        connection.execute("UPDATE users SET password_hash = ? WHERE id = ?", (password_hash, user_id))
+        append_audit(connection, actor, action, "user", user_id, {"username": row["username"]})
+
+
+def set_role(user_id, role, actor):
+    """Change a user's role (audited). The last admin cannot be demoted, so nobody is locked out."""
+    check_role(role)
+    with connect_db() as connection:
+        connection.lock_writes()
+        row = connection.execute("SELECT username, role FROM users WHERE id = ?", (user_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="User not found.")
+        if row["role"] == role:
+            return {"id": user_id, "username": row["username"], "role": role}
+        if row["role"] == "admin":
+            admins = connection.execute("SELECT COUNT(*) FROM users WHERE role = 'admin'").fetchone()[0]
+            if admins <= 1:
+                raise HTTPException(status_code=409, detail="This is the only admin. Make another user admin first.")
+        connection.execute("UPDATE users SET role = ? WHERE id = ?", (role, user_id))
+        append_audit(connection, actor, "user_role_changed", "user", user_id,
+                     {"username": row["username"], "from": row["role"], "to": role})
+    return {"id": user_id, "username": row["username"], "role": role}

@@ -1,0 +1,58 @@
+{
+  "experiment_id": "EXP-004",
+  "run_at": "2026-11-06 17:35",
+  "git_commit": "78033ce+uncommitted-src-changes",
+  "cases": 70,
+  "defect_cases": 57,
+  "clean_cases": 13,
+  "methods": {
+    "B0 always-pass": {
+      "status_accuracy": 0.186,
+      "flag_accuracy": 0.186,
+      "defects_flagged": 0.0,
+      "clean_false_alarms": 0.0,
+      "flag_accuracy_by_group": {
+        "hard-dev": 0.125,
+        "hard-dev-v1.4": 0.333,
+        "hard-heldout": 0.25,
+        "standard": 0.125
+      }
+    },
+    "B1 exact-warning": {
+      "status_accuracy": 0.3,
+      "flag_accuracy": 0.329,
+      "defects_flagged": 0.228,
+      "clean_false_alarms": 0.231,
+      "flag_accuracy_by_group": {
+        "hard-dev": 0.125,
+        "hard-dev-v1.4": 0.667,
+        "hard-heldout": 0.417,
+        "standard": 0.25
+      }
+    },
+    "B2 text-similarity (<0.9)": {
+      "status_accuracy": 0.629,
+      "flag_accuracy": 0.729,
+      "defects_flagged": 0.825,
+      "clean_false_alarms": 0.692,
+      "flag_accuracy_by_group": {
+        "hard-dev": 0.75,
+        "hard-dev-v1.4": 0.667,
+        "hard-heldout": 0.542,
+        "standard": 0.875
+      }
+    },
+    "SAFE-SOP safe-sop-eval-1.4": {
+      "status_accuracy": 0.943,
+      "flag_accuracy": 0.943,
+      "defects_flagged": 0.947,
+      "clean_false_alarms": 0.077,
+      "flag_accuracy_by_group": {
+        "hard-dev": 0.875,
+        "hard-dev-v1.4": 1.0,
+        "hard-heldout": 0.875,
+        "standard": 1.0
+      }
+    }
+  }
+}

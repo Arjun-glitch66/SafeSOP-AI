@@ -13,7 +13,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const back = location.state?.from?.pathname || "/documents";
+  const back = location.state?.from?.pathname || "/dashboard";
 
   if (user) return <Navigate to={back} replace />;
 

@@ -13,10 +13,10 @@ export default function EvaluationReport({ evaluation, onShowInComparison, rende
   return (
     <>
       <div className="metrics-grid">
-        <MetricCard label="Warning recall" value={percent(m.warning_recall)} note={`${m.source_warnings} source warnings`} icon={AlertTriangle} tone="amber" />
-        <MetricCard label="Unsupported instructions" value={percent(m.unsupported_instruction_rate)} note={`${m.unsupported_values} unsupported value(s)`} icon={FileSearch} tone="red" />
+        <MetricCard label="Warning recall" value={percent(m.warning_recall)} note={`${m.source_warnings} source warnings${m.warning_precision != null ? ` · precision ${percent(m.warning_precision)}` : ""}${m.downgraded_warnings ? ` · ${m.downgraded_warnings} downgraded` : ""}`} icon={AlertTriangle} tone="amber" />
+        <MetricCard label="Unsupported instructions" value={percent(m.unsupported_instruction_rate)} note={`${m.unsupported_values} unsupported value(s)${m.changed_values ? ` · ${m.changed_values} changed` : ""}`} icon={FileSearch} tone="red" />
         <MetricCard label="Step-order integrity" value={percent(m.order_integrity)} note={`${m.omitted_steps} omitted · ${m.duplicated_steps} duplicated · ${m.conflicting_instructions} conflicting`} icon={Workflow} tone="purple" />
-        <MetricCard label="Automated status" value={evaluationLabel[evaluation.status]} note={evaluation.evaluator_version} icon={FlaskConical} tone="blue" />
+        <MetricCard label="Automated status" value={evaluationLabel[evaluation.status]} note={`${evaluation.evaluator_version}${m.lexical_consistency != null ? ` · wording kept ${percent(m.lexical_consistency)}` : ""}`} icon={FlaskConical} tone="blue" />
       </div>
       {evaluation.findings.length === 0 && <p className="small-note">No automated rule fired. This is not safety approval.</p>}
       {evaluation.findings.map((finding, index) => (

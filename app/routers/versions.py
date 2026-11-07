@@ -15,7 +15,7 @@ from app.pagination import page_params, paginate
 from app.schemas import FINDING_VERDICTS
 from app.services import exports, jobs
 from app.services.evaluation import load_version_source, run_and_save_evaluation
-from app.services.generation import prepare_generation
+from app.services.generation import PART_SCOPES, prepare_generation
 from app.services.pdf import ocr_findings, render_draft_pdf
 from src.safety_evaluator import extract_draft_section, extract_warnings, text_lines
 from src.translator import LANGUAGES, translation_findings
@@ -89,6 +89,10 @@ def evaluate_version(version_id: str):
     """Re-run the automated checks, e.g. for versions created before the evaluator existed."""
     row, original_text = load_version_source(version_id)
     structured = json.loads(row["structured_json"]) if row["structured_json"] else None
+    if row["scope"] in PART_SCOPES:
+        # Section/step drafts: the model's source ids are local to the revised part, but the
+        # check compares whole documents, so it must use the text path (as generation does).
+        structured = None
     # The translation check is repeated on the stored back-translation; no new model calls.
     extra = ocr_findings(row["ocr_pages"]) + (
         translation_findings(row["content"], row["back_translation"], row["output_language"])
@@ -197,7 +201,7 @@ def list_versions(document_id: str, page=Depends(page_params)):
         return paginate(connection, """
             SELECT v.id, v.document_id, v.request_id, v.version_number, v.status,
                    v.created_at, length(v.content) AS characters,
-                   v.source_document_id, v.parent_version_id, v.target_page,
+                   v.source_document_id, v.parent_version_id, v.target_page, v.target_section,
                    v.model, v.prompt_version, v.input_tokens, v.output_tokens,
                    v.temperature, v.structured_output,
                    cr.description AS change_request, cr.scope,

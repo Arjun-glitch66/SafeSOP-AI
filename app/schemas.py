@@ -13,6 +13,16 @@ class NewUser(BaseModel):
     role: str
 
 
+class PasswordChange(BaseModel):
+    current_password: str = Field(max_length=200)
+    new_password: str = Field(max_length=200)
+
+
+class UserUpdate(BaseModel):
+    role: str | None = None
+    password: str | None = Field(None, max_length=200)
+
+
 # Version states: draft -> needs_revision | approved | rejected. Approved versions are
 # locked; any further review is refused with 409. Changes go into a new version.
 REVIEW_DECISIONS = {"approved", "rejected", "needs_revision"}

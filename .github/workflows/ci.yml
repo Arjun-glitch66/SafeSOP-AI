@@ -25,6 +25,7 @@ jobs:
       - name: Tests with coverage
         run: python -m pytest -q --cov --cov-report=term --cov-report=xml
       - run: python evaluation/validate_evaluator.py
+      - run: python evaluation/baselines.py
       - uses: actions/upload-artifact@v4
         with:
           name: backend-coverage
