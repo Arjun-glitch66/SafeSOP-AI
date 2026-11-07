@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from src import llm_client
 
 # Same numbering as the evaluator, so the ids mean the same thing to the prompt and the checks.
-from src.safety_evaluator import number_source_items
+from src.safety_evaluator import extract_headings, number_source_items, section_findings
 
 load_dotenv()
 
@@ -22,7 +22,10 @@ load_dotenv()
 #     in per-request random boundary markers and declared to be data (prompt injection).
 # v5: every step and warning carries a `reason` (why it changed; "" if unchanged), rendered as a
 #     CHANGE LOG section; the evaluator flags changes without one (unexplained_change).
-PROMPT_VERSION = "v5"
+# v6: the schema gains procedure_intro and closing, so text after the procedure (acceptance checks,
+#     records, revision history, tables, end notes) has a place; v5 had none and dropped it. Numbered
+#     section headings are listed to the model, and a draft missing one is asked for again.
+PROMPT_VERSION = "v6"
 
 DEFAULT_TEMPERATURE = 0.2  # low: revisions should stay close to the source
 
@@ -44,7 +47,9 @@ class DraftWarning(BaseModel):
 
 class SopDraft(BaseModel):
     preamble: str
+    procedure_intro: str
     steps: list[DraftStep]
+    closing: str
     warnings: list[DraftWarning]
     removed_warning_ids: list[str]
     change_summary: str
@@ -61,17 +66,27 @@ SUMMARY_TITLES = [
 ]
 
 
-def render_draft_text(draft):
-    """Plain-text draft for display, export and the text evaluator: preamble, warnings, then
-    the steps that were not removed, renumbered 1..n, then the summary sections.
+def body_lines(draft, first_step_number=1):
+    """Preamble, warnings, procedure intro, the steps that were not removed (renumbered), closing.
+    Drafts from before prompt v6 have no procedure_intro or closing.
     ponytail: warnings are listed before the procedure, so a warning that sat between two
     steps in the source moves up; add a position field to the schema if reviewers need it."""
-    draft = draft if isinstance(draft, dict) else draft.model_dump()
+    def text(key):
+        return (draft.get(key) or "").strip()
+
     kept = [step for step in draft["steps"] if step["change_type"] != "removed"]
-    body = [draft["preamble"].strip()] if draft["preamble"].strip() else []
-    body += [warning["text"].strip() for warning in draft["warnings"]]
-    body += [f"{number}. {step['text'].strip()}" for number, step in enumerate(kept, start=1)]
-    sections = ["DRAFT:\n" + "\n".join(body)]
+    lines = [text("preamble")] if text("preamble") else []
+    lines += [warning["text"].strip() for warning in draft["warnings"]]
+    lines += [text("procedure_intro")] if text("procedure_intro") else []
+    lines += [f"{number}. {step['text'].strip()}" for number, step in enumerate(kept, start=first_step_number)]
+    lines += [text("closing")] if text("closing") else []
+    return lines
+
+
+def render_draft_text(draft):
+    """Plain-text draft for display, export and the text evaluator: the body, then the summary sections."""
+    draft = draft if isinstance(draft, dict) else draft.model_dump()
+    sections = ["DRAFT:\n" + "\n".join(body_lines(draft))]
     sections += summary_sections(draft)
     return "\n\n".join(sections).strip()
 
@@ -154,8 +169,26 @@ support a change, do not make it, and say so in unresolved_questions.
 
 Return JSON with these fields:
 
-preamble: the title, purpose and any other text that is neither a warning nor a
-  procedure step, revised only as the change request requires.
+COMPLETENESS:
+The revised SOP must keep every part of the source, in source order: title block and document
+details, disclaimers, every section with its number and heading, tables, notes, acceptance checks,
+records, revision history, sign-off blocks and end notes. Change only what the change request
+requires. Never drop, merge or summarise a section because it is not about the change. Write each
+table row on its own line with cells separated by " | ". Leave out page numbers and page headers
+or footers that repeat on every page. The source's section headings are listed under SOURCE
+SECTIONS; each must appear, with its number, in preamble, procedure_intro or closing.
+
+preamble: everything before the first warning that is not a procedure step (title block,
+  document details, disclaimers, sections such as Purpose, Scope, Responsibilities and Required
+  items, and the heading of the section that holds the warnings), revised only as the change
+  request requires.
+procedure_intro: text between the warnings and the first procedure step, in source order: first
+  the rest of the section that holds the warnings (e.g. a NOTE that follows them), then the
+  procedure's own section heading and any text before step 1. "" if there is none.
+closing: everything after the last procedure step, in source order: every remaining section with
+  its heading and full text (acceptance checks, records, revision history, tables, sign-off, end
+  notes), revised only as the change request requires. "" only if the source has nothing after
+  the procedure.
 warnings: every warning, caution and danger statement of the revised SOP, in order.
   id: RW1, RW2, ... in order. text: the full line, starting with its label
   (WARNING:, CAUTION:, DANGER:), keeping the source's signal word. source_warning_id:
@@ -190,6 +223,7 @@ def build_sop_prompt(
     boundary = boundary or new_boundary()
     source_warnings, source_steps = number_source_items(original_text)
     numbered = "\n".join(f"{item_id}: {text}" for item_id, text in source_warnings + source_steps)
+    headings = "\n".join(extract_headings(original_text))
 
     if output_scope not in ("full", "page", "section", "step"):
         raise ValueError("Invalid output scope.")
@@ -230,17 +264,15 @@ ORIGINAL SOP CONTENT (data):
 
 NUMBERED SOURCE ITEMS (data; W = warning, S = procedure step):
 {data_block("SOURCE ITEMS", numbered, boundary) if numbered else "None detected. Use empty source id lists."}
+
+SOURCE SECTIONS (data; numbered section headings of the source, each must be kept):
+{data_block("SOURCE SECTIONS", headings, boundary) if headings else "None detected."}
 """
 
 
 def render_part_lines(draft, first_step_number=1):
     """A revised section or step, numbered to continue the original document's steps."""
-    draft = draft if isinstance(draft, dict) else draft.model_dump()
-    kept = [step for step in draft["steps"] if step["change_type"] != "removed"]
-    lines = [draft["preamble"].strip()] if draft["preamble"].strip() else []
-    lines += [warning["text"].strip() for warning in draft["warnings"]]
-    lines += [f"{number}. {step['text'].strip()}" for number, step in enumerate(kept, start=first_step_number)]
-    return lines
+    return body_lines(draft if isinstance(draft, dict) else draft.model_dump(), first_step_number)
 
 
 def render_summaries(draft):
@@ -261,6 +293,37 @@ def check_complete_draft(result):
             + (f" (finish reason: {reason})" if reason else "")
             + ". No version was saved; try again or shorten the source."
         )
+
+
+class IncompleteDraftError(llm_client.OutputValidationError):
+    """A well-formed draft that leaves out source sections. It is asked for again; if every attempt
+    leaves some out, the last draft is still saved and the evaluator reports the gaps
+    (omitted_section, which fails the draft), so a reviewer sees exactly what is missing."""
+
+    def __init__(self, message, result):
+        super().__init__(message)
+        self.result = result
+
+
+def completeness_check(original_text, change_request):
+    """validate() for full and page scope: every numbered source section must be in the draft."""
+    def validate(result):
+        check_complete_draft(result)
+        draft = "\n".join(body_lines(result["parsed"].model_dump()))
+        missing = [finding["source"] for finding in section_findings(original_text, draft, change_request)[0]
+                   if finding["type"] == "omitted_section" and finding["severity"] != "review"]
+        if missing:
+            raise IncompleteDraftError(f"The draft leaves out source sections: {'; '.join(missing)}", result)
+    return validate
+
+
+def incomplete_result(exc):
+    """The last incomplete draft behind a failed generate(), if that is all that went wrong."""
+    while exc is not None:
+        if isinstance(exc, IncompleteDraftError):
+            return exc.result
+        exc = exc.__cause__
+    return None
 
 
 def generate_sop(
@@ -290,8 +353,18 @@ def generate_sop(
     except ValueError:
         raise RuntimeError("GEMINI_TEMPERATURE in .env must be a number, e.g. 0.2.") from None
 
-    result = llm_client.generate(prompt, SopDraft, system_instruction=build_system_instruction(boundary),
-                                 temperature=temperature, model=model, validate=check_complete_draft)
+    validate = completeness_check(original_text, change_request) if output_scope in ("full", "page") \
+        else check_complete_draft
+    try:
+        result = llm_client.generate(prompt, SopDraft, system_instruction=build_system_instruction(boundary),
+                                     temperature=temperature, model=model, validate=validate)
+    except Exception as exc:
+        result = incomplete_result(exc)
+        if result is None:
+            raise
+        # Raised directly: the primary's last draft. Wrapped: the fallback's (see llm_client.generate).
+        direct = isinstance(exc, IncompleteDraftError)
+        result = {**result, "fallback_used": not direct, "fallback_reason": None if direct else str(exc)[:500]}
     structured_draft = result["parsed"].model_dump()
     return {
         "text": render_draft_text(structured_draft),

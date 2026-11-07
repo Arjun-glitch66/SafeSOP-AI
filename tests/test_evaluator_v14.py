@@ -29,7 +29,7 @@ def types(result):
 
 
 def test_version_tag():
-    assert EVALUATOR_VERSION == "safe-sop-eval-1.4"
+    assert EVALUATOR_VERSION == "safe-sop-eval-1.5"
 
 
 def test_an_unchanged_draft_with_a_request_only_fails_change_applied():

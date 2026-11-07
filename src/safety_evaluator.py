@@ -194,7 +194,12 @@ def evaluate_sop(
 # 1.3: required-element checklists (src/checklists) and hierarchy-of-controls downgrades.
 # 1.4: signal-word downgrades (DANGER -> CAUTION), values changed to another value of the same
 #      unit, unexplained changes (prompt v5 reasons), warning precision and lexical consistency.
-EVALUATOR_VERSION = "safe-sop-eval-1.4"
+# 1.5: wrapped PDF lines are joined before parsing (a warning or step was cut at the line wrap);
+#      numbered section headings ("7. Acceptance checks") are sections, not procedure steps, and
+#      every source section must still be in the draft (omitted_section, section_content_missing);
+#      a structured draft that keeps a warning word for word but does not list it as a warning is
+#      flagged for review (warning_not_listed) instead of reported missing.
+EVALUATOR_VERSION = "safe-sop-eval-1.5"
 
 MATCH_THRESHOLD = 0.8      # at or above: preserved / matched
 PARTIAL_THRESHOLD = 0.5    # between partial and match: altered, needs review
@@ -253,8 +258,24 @@ def clean_line(line):
     return re.sub(r"^[-•]\s+", "", line)
 
 
+SENTENCE_END = re.compile(r"[.!?:;]$")
+
+
 def text_lines(text):
-    return [line for line in (clean_line(raw) for raw in text.splitlines()) if line]
+    """Cleaned, non-blank lines. v1.5: a line that continues a wrapped sentence (the line just
+    above is not blank and has no closing punctuation, and this one is not a bullet and starts in
+    lower case) is joined to it, so a PDF line wrap cannot cut a warning or a step in two."""
+    lines, previous_raw = [], ""
+    for raw in text.splitlines():
+        line = clean_line(raw)
+        continues = (line and lines and previous_raw.strip() and line[0].islower()
+                     and not raw.lstrip().startswith(("-", "•", "*")) and not SENTENCE_END.search(lines[-1]))
+        if continues:
+            lines[-1] = f"{lines[-1]} {line}"
+        elif line:
+            lines.append(line)
+        previous_raw = raw
+    return lines
 
 
 def tokens(text):
@@ -322,21 +343,60 @@ def extract_draft_section(generated_text):
     return (match.group(1).strip(), True) if match else (cleaned, False)
 
 
+def heading_like(text):
+    """Short, capitalised, no closing punctuation and no numbers: 'Acceptance checks', 'Revision history'."""
+    text = text.strip()
+    return (0 < len(text.split()) <= 6 and text[:1].isupper()
+            and not re.search(r"[.;:!?,]$", text) and not re.search(r"\d", text))
+
+
+def neighbour_number(number, offset):
+    """'2' -> '3' (offset 1); '2.1' -> '2.0' (offset -1): the same level, one along."""
+    parts = number.split(".")
+    return ".".join(parts[:-1] + [str(int(parts[-1]) + offset)])
+
+
+def numbered_lines(lines):
+    """(index, number, text, is_heading) for every numbered line. v1.5: a numbered line is a section
+    heading, not a step, when it reads like a heading and does not continue the list around it
+    (the line before is not item n-1 and the line after is not item n+1). '6. Procedure' followed by
+    '1. Review ...' is a heading; '3. Open drain valve' between steps 2 and 4 stays a step."""
+    matches = [STEP_LINE.match(line) for line in lines]
+    numbers = [(m.group(1) or m.group(2)) if m else None for m in matches]
+    items = []
+    for i, match in enumerate(matches):
+        if not match:
+            continue
+        number, text = numbers[i], match.group(3).strip()
+        continues = ((i > 0 and numbers[i - 1] == neighbour_number(number, -1))
+                     or (i + 1 < len(lines) and numbers[i + 1] == neighbour_number(number, 1)))
+        items.append((i, number, text, heading_like(text) and not continues))
+    return items
+
+
 def extract_steps(text):
-    steps = []
-    for line in text_lines(text):
-        match = STEP_LINE.match(line)
-        if match:
-            steps.append({"number": match.group(1) or match.group(2), "text": match.group(3).strip()})
-    return steps
+    return [{"number": number, "text": body}
+            for _, number, body, is_heading in numbered_lines(text_lines(text)) if not is_heading]
+
+
+def extract_headings(text):
+    """Numbered section headings ('1. Purpose' -> 'Purpose'), in order."""
+    return [body for _, _, body, is_heading in numbered_lines(text_lines(text)) if is_heading]
+
+
+def strip_number(line):
+    match = STEP_LINE.match(line)
+    return match.group(3).strip() if match else line
 
 
 def extract_warnings(text):
     """Non-step lines with a hazard keyword and at least three content words
     (so bare headings such as 'SAFETY WARNINGS' are ignored)."""
+    lines = text_lines(text)
+    numbered = {index for index, *_ in numbered_lines(lines)}
     return [
-        line for line in text_lines(text)
-        if not STEP_LINE.match(line) and WARNING_LINE.search(line) and len(tokens(line)) >= 3
+        line for index, line in enumerate(lines)
+        if index not in numbered and WARNING_LINE.search(line) and len(tokens(line)) >= 3
     ]
 
 
@@ -684,6 +744,76 @@ def line_number(lines, text):
     return None
 
 
+def running_lines(lines):
+    """Page headers and footers: lines that repeat (ignoring numbers) on several pages."""
+    keys = [re.sub(r"\d+", "#", line.lower()) for line in lines]
+    return {line for line, key in zip(lines, keys, strict=True) if keys.count(key) > 1}
+
+
+HEADING_SEPARATOR = re.compile(r"\s*(?::|\s[-–—]\s)\s*")
+
+
+def heading_candidate(line):
+    """Tokens of the heading a draft line may carry: the whole line if short, else the part before
+    a ':' or ' - ' when that part is short ("1. Purpose: Describe a controlled ..."). Empty if none."""
+    text = strip_number(line)
+    if len(text.split()) <= 10:
+        return tokens(text)
+    head = HEADING_SEPARATOR.split(text, maxsplit=1)[0]
+    return tokens(head) if len(head.split()) <= 6 else set()
+
+
+def section_findings(original_text, draft, change_request):
+    """v1.5: every numbered section of the source must still be in the draft, under its heading,
+    with most of its own text (tables, records, revision history). Steps and warnings are left out
+    of the section text because they have their own checks. Returns (findings, metrics)."""
+    source_lines, draft_lines = text_lines(original_text), text_lines(draft)
+    items = numbered_lines(source_lines)
+    headings = [(index, text) for index, _, text, is_heading in items if is_heading]
+    if not headings:
+        return [], {"source_sections": 0, "section_coverage": None, "omitted_sections": 0}
+    skip = {index for index, *_ in items} | running_lines(source_lines)
+    warnings = set(extract_warnings(original_text))
+    short = [heading_candidate(line) for line in draft_lines]
+    heading_tokens = [tokens(text) for _, text in headings]
+    # Draft lines that carry one of the source headings: they end the previous section's text.
+    draft_heading_rows = sorted({row for row, line_tokens in enumerate(short) if line_tokens and any(
+        dice(heading, line_tokens) >= MATCH_THRESHOLD for heading in heading_tokens)})
+    removal_requested = bool(REMOVAL_WORDS & plain_words(change_request))
+    change_tokens = tokens(change_request)
+
+    findings, present = [], 0
+    for n, (row, _heading) in enumerate(headings):
+        index, score = best_match(heading_tokens[n], short, dice)
+        if score < MATCH_THRESHOLD:
+            requested = removal_requested and containment(heading_tokens[n], change_tokens) >= MATCH_THRESHOLD
+            findings.append({
+                "type": "omitted_section", "severity": "review" if requested else "high",
+                "detail": ("Section removed; the change request appears to ask for this. Confirm." if requested
+                           else "Source section not found in the draft: its heading and text are missing."),
+                "source": source_lines[row]})
+            continue
+        present += 1
+        end = headings[n + 1][0] if n + 1 < len(headings) else len(source_lines)
+        body = [line for i, line in enumerate(source_lines[row + 1:end], start=row + 1)
+                if i not in skip and line not in skip and line not in warnings]
+        body_tokens = set().union(*(tokens(line) for line in body)) if body else set()
+        if len(body_tokens) < 3:
+            continue
+        draft_end = next((r for r in draft_heading_rows if r > index), len(draft_lines))
+        # From the heading line itself, in case the section's text starts on it ("1. Purpose: Describe ...").
+        draft_tokens = set().union(set(), *(tokens(line) for line in draft_lines[index:draft_end]))
+        coverage = containment(body_tokens, draft_tokens)
+        if coverage < PARTIAL_THRESHOLD:
+            findings.append({
+                "type": "section_content_missing", "severity": "review",
+                "detail": f"The heading is in the draft, but only {coverage:.0%} of this section's own text "
+                          "(tables, records, notes) is under it. Confirm nothing was dropped.",
+                "source": source_lines[row], "draft": draft_lines[index], "score": round(coverage, 2)})
+    return findings, {"source_sections": len(headings), "section_coverage": round(present / len(headings), 4),
+                      "omitted_sections": len(headings) - present}
+
+
 def evaluate_revision(original_text, generated_text, change_request="", document_type=None):
     """
     Automated checks of a generated draft against the original SOP.
@@ -872,7 +1002,10 @@ def evaluate_revision(original_text, generated_text, change_request="", document
 
     # 7. Required elements for this SOP type (src/checklists/*.yaml), if a type was given
     checklist_findings, metrics["required_elements"] = check_required_elements(document_type, original_lines, draft_lines)
-    findings += checklist_findings
+    # 8. Sections (v1.5): headings and their own text, e.g. acceptance checks, records, revision history
+    found, section_metrics = section_findings(original_text, draft, change_request)
+    metrics.update(section_metrics)
+    findings += checklist_findings + found
 
     for finding in findings:  # line numbers let the UI jump from a finding to the comparison
         finding.setdefault("source_line", line_number(original_lines, finding.get("source")))
@@ -951,6 +1084,16 @@ def evaluate_structured_revision(original_text, generated_text, structured, chan
     for warning_id, text in source_warnings:
         carriers = [w for w in warnings if w.get("source_warning_id") == warning_id]
         if not carriers:
+            index, score = best_match(tokens(text), [tokens(line) for line in draft_lines], containment)
+            if warning_id not in removed_ids and score >= MATCH_THRESHOLD:
+                # Word for word in the draft (e.g. a disclaimer kept in the preamble), but not listed as
+                # a warning: it is there, yet its label and position are not checked. A reviewer confirms.
+                preserved += 1
+                add(finding("warning_not_listed", "review",
+                            "The warning's text is in the draft, but the model did not list it as a warning. "
+                            "Confirm it is still shown and labelled as a warning.",
+                            source=text, draft=draft_lines[index], score=round(score, 2)), warning_id)
+                continue
             if warning_id in removed_ids:
                 add(finding("warning_removed", "critical",
                             "The draft removes this source warning. A qualified reviewer must confirm the "
@@ -1115,7 +1258,10 @@ def evaluate_structured_revision(original_text, generated_text, structured, chan
         "change_applied": not any(f["type"] == "change_not_applied" for f in findings) if change_request.strip() else None,
     }
     checklist_findings, metrics["required_elements"] = check_required_elements(document_type, original_lines, draft_lines)
-    for item in checklist_findings:
+    # 8. Sections (v1.5): headings and their own text, e.g. acceptance checks, records, revision history
+    found, section_metrics = section_findings(original_text, draft, change_request)
+    metrics.update(section_metrics)
+    for item in checklist_findings + found:
         add(item)
 
     severities = {f["severity"] for f in findings}

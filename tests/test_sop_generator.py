@@ -31,7 +31,8 @@ def v3_draft(*step_texts, steps=None, warnings=(), removed_warning_ids=(), pream
         sop_generator.DraftStep(id=f"R{n}", text=text, source_step_ids=[f"S{n}"], change_type="unchanged", reason="")
         for n, text in enumerate(step_texts, start=1)]
     return sop_generator.SopDraft(
-        preamble=preamble, steps=steps, warnings=list(warnings), removed_warning_ids=list(removed_warning_ids),
+        preamble=preamble, procedure_intro="", closing="", steps=steps, warnings=list(warnings),
+        removed_warning_ids=list(removed_warning_ids),
         change_summary="none", preserved_safety_requirements="all", unresolved_questions="none",
         source_limitations="none")
 
@@ -49,7 +50,7 @@ def test_structured_output_is_rendered_as_sections():
     result = sop_generator.generate_sop("source", "change")
 
     assert result["structured_output"] is True
-    assert result["prompt_version"] == "v5" and result["temperature"] == 0.2
+    assert result["prompt_version"] == "v6" and result["temperature"] == 0.2
     assert extract_draft_section(result["text"]) == ("1. Isolate power.", True)
     config = FakeClient.last_call["config"]
     assert config.response_mime_type == "application/json" and config.response_schema is sop_generator.SopDraft
@@ -120,7 +121,7 @@ def test_structured_draft_is_returned_and_rendered_without_removed_steps():
             "- R2 removed from S2: The request replaces draining with flushing.\n"
             "- R3 added: NO REASON GIVEN") in result["text"]
     assert result["text"].index("CHANGE SUMMARY:") < result["text"].index("CHANGE LOG:")
-    assert result["prompt_version"] == "v5"
+    assert result["prompt_version"] == "v6"
 
 
 def test_a_truncated_answer_is_asked_for_once_more_before_failing(monkeypatch):
