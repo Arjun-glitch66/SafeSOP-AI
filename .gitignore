@@ -6,17 +6,13 @@ __pycache__/
 
 # Virtual environments
 .venv/
-
 # API keys and secrets
 .env
-
 # Original and generated documents
 data/originals/
 data/generated/
-
 # Raw experiment outputs (full model responses). Summaries in results/ are committed.
 results/raw/
-
 # All environment files
 .env
 .env.*
