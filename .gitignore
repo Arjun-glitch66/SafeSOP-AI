@@ -11,19 +11,24 @@ __pycache__/
 # Original and generated documents
 data/originals/
 data/generated/
+
 # Raw experiment outputs (full model responses). Summaries in results/ are committed.
 results/raw/
+
 # All environment files
 .env
 .env.*
+
 # Local databases
 data/
 *.db
 *.sqlite
 *.sqlite3
+
 # Frontend dependencies and build
 frontend/node_modules/
 frontend/dist/
+
 # Local tool state (gstack browser/agent)
 .gstack/
 !.env.example
