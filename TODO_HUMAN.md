@@ -28,6 +28,8 @@ Items the coding agent stopped on because they need a product, licence, cost or 
 
 ## Phase 0
 
+
+
 - **0.4 Should "rejected" also be a final, locked state?** Right now only `approved` is locked
   (any later review gets HTTP 409). A `rejected` version can still be re-reviewed and even
   approved later. If rejection should be final, add `"rejected"` to `LOCKED_STATUSES` in
